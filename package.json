@@ -2,7 +2,7 @@
   "name": "speck-app",
   "version": "0.0.1",
   "description": "Speck Electron app",
-  "main": "main.js",
+  "main": "src/main.js",
   "dependencies": {
     "abbrev": "^1.1.1",
     "agent-base": "^6.0.2",

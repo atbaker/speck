@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
+      content="default-src 'self'; connect-src 'self'"
     />
     <meta
       http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
+      content="default-src 'self'; connect-src 'self'"
     />
     <title>Hello from Electron renderer!</title>
   </head>
@@ -16,6 +16,8 @@
     <h1>Hello from Electron renderer!</h1>
     <p>👋</p>
     <p id="info"></p>
+    <button id="fetch-hello-python">Fetch "Hello Python"</button>
+    <pre id="output"></pre>
+    <script src="./renderer.js"></script>
   </body>
-  <script src="./renderer.js"></script>
 </html>
