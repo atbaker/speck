@@ -6,7 +6,7 @@ module.exports = {
     asar: true,
     extraResource: [
       'dist/hello',
-      'dist/hello.exe',
+      // 'dist/hello.exe',
     ],
   },
   rebuildConfig: {},

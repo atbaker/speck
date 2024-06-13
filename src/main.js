@@ -48,7 +48,8 @@ app.whenReady().then(() => {
   ipcMain.handle('api-request', async (event, endpoint) => {
     return new Promise((resolve, reject) => {
       const options = {
-        socketPath: "/tmp/fastapi.sock",
+        hostname: "127.0.0.1",
+        port: 7725,
         path: endpoint,
         method: 'GET',
         headers: {

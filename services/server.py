@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-import os
 
 app = FastAPI()
 
@@ -9,9 +8,4 @@ async def hello_world():
 
 if __name__ == "__main__":
     import uvicorn
-
-    socket_path = "/tmp/fastapi.sock"
-    if os.path.exists(socket_path):
-        os.remove(socket_path)
-
-    uvicorn.run(app, uds=socket_path)
+    uvicorn.run(app, host="127.0.0.1", port=7725)
