@@ -5,8 +5,12 @@ module.exports = {
   packagerConfig: {
     asar: true,
     extraResource: [
-      'dist/hello',
-      // 'dist/hello.exe',
+      'dist/server',
+    ],
+    ignore: [
+      'build',
+      'dist/server/_internal/models',
+      'services',
     ],
   },
   rebuildConfig: {},

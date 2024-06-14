@@ -30,8 +30,10 @@ app.whenReady().then(() => {
 
   // Start the FastAPI server
   const serverExecutable = process.platform === 'win32'
-    ? path.join(__dirname, '..', 'dist', 'server.exe')
-    : path.join(__dirname, '..', 'dist', 'server');
+    // ? path.join(__dirname, '..', 'dist/server', 'server.exe')
+    // : path.join(__dirname, '..', 'dist/server', 'server');
+    ? path.join(__dirname, '../..', 'server', 'server.exe')
+    : path.join(__dirname, '../..', 'server', 'server');
 
   serverProcess = execFile(serverExecutable, (error, stdout, stderr) => {
     if (error) {
@@ -78,12 +80,14 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  if (serverProcess) {
+    serverProcess.kill()
+  }
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    app.quit();
-  }
-
-  if (serverProcess) {
-    serverProcess.kill();
+    app.quit()
   }
 });

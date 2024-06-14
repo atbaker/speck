@@ -5,6 +5,8 @@ name = "pypi"
 
 [packages]
 fastapi = "*"
+huggingface-hub = "*"
+llama-cpp-python = "*"
 
 [dev-packages]
 pyinstaller = "*"
