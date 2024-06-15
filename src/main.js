@@ -1,10 +1,14 @@
-const { app, BrowserWindow, ipcMain } = require('electron/main');
+const { app, BrowserWindow, ipcMain, shell } = require('electron/main');
 const path = require('node:path');
 const { execFile } = require('child_process');
-const http = require('http');
-const fs = require('fs');
+const { URL } = require('url');
+const log = require('electron-log');
+
+log.initialize();
+log.info('Starting Speck...');
 
 let serverProcess;
+let tokens = {};
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -20,6 +24,13 @@ const createWindow = () => {
 
 app.whenReady().then(() => {
   ipcMain.handle('ping', () => 'pong');
+  ipcMain.handle('start-auth', async () => {
+    shell.openExternal('https://atbaker.ngrok.io/authorize');
+  });
+  ipcMain.handle('get-tokens', async () => {
+    return tokens;
+  });
+
   createWindow();
 
   app.on('activate', () => {
@@ -28,55 +39,27 @@ app.whenReady().then(() => {
     }
   });
 
-  // Start the FastAPI server
-  const serverExecutable = process.platform === 'win32'
-    // ? path.join(__dirname, '..', 'dist/server', 'server.exe')
-    // : path.join(__dirname, '..', 'dist/server', 'server');
-    ? path.join(__dirname, '../..', 'server', 'server.exe')
-    : path.join(__dirname, '../..', 'server', 'server');
+  // Register custom protocol
+  app.setAsDefaultProtocolClient('speck');
 
-  serverProcess = execFile(serverExecutable, (error, stdout, stderr) => {
+  // Start the FastAPI server TODO: Fix in production to use pyinstaller executable
+  // ? path.join(__dirname, '../..', 'server', 'server.exe')
+  // : path.join(__dirname, '../..', 'server', 'server');
+  const serverExecutable = process.platform === 'win32'
+    ? 'python'
+    : 'python3';
+  const serverArgs = ['-m', 'services.server'];
+
+  serverProcess = execFile(serverExecutable, serverArgs, (error, stdout, stderr) => {
     if (error) {
-      console.error(`Error: ${error.message}`);
+      log.error(`Error: ${error.message}`);
       return;
     }
     if (stderr) {
-      console.error(`stderr: ${stderr}`);
+      log.error(`stderr: ${stderr}`);
       return;
     }
-    console.log(`stdout: ${stdout}`);
-  });
-
-  ipcMain.handle('api-request', async (event, endpoint) => {
-    return new Promise((resolve, reject) => {
-      const options = {
-        hostname: "127.0.0.1",
-        port: 7725,
-        path: endpoint,
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      };
-
-      const req = http.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          resolve(JSON.parse(data));
-        });
-      });
-
-      req.on('error', (e) => {
-        reject(`Problem with request: ${e.message}`);
-      });
-
-      req.end();
-    });
+    log.log(`stdout: ${stdout}`);
   });
 });
 
@@ -89,5 +72,19 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+  }
+});
+
+// Handle the 'open-url' event on macOS
+app.on('open-url', (event, url) => {
+  log.info('open-url event triggered')
+  event.preventDefault();
+  const parsedUrl = new URL(url);
+  tokens.accessToken = parsedUrl.searchParams.get('access_token');
+  tokens.refreshToken = parsedUrl.searchParams.get('refresh_token');
+  // If you want to display the tokens immediately, you might want to send a message to the renderer process here
+  if (BrowserWindow.getAllWindows().length > 0) {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    mainWindow.webContents.send('tokens-updated', tokens);
   }
 });

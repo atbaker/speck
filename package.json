@@ -63,6 +63,7 @@
     "dir-compare": "^4.2.0",
     "eastasianwidth": "^0.2.0",
     "electron-installer-common": "^0.10.3",
+    "electron-log": "^5.1.5",
     "electron-squirrel-startup": "^1.0.1",
     "emoji-regex": "^9.2.2",
     "encoding": "^0.1.13",
