@@ -5,8 +5,12 @@ name = "pypi"
 
 [packages]
 fastapi = "*"
+google-api-python-client = "*"
+google-auth = "*"
+keyring = "*"
 huggingface-hub = "*"
 llama-cpp-python = "*"
+sqlmodel = "*"
 
 [dev-packages]
 pyinstaller = "*"
