@@ -11,6 +11,9 @@ keyring = "*"
 huggingface-hub = "*"
 llama-cpp-python = "*"
 sqlmodel = "*"
+pydantic-settings = "*"
+tqdm = "*"
+huey = "*"
 
 [dev-packages]
 pyinstaller = "*"

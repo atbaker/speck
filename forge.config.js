@@ -10,7 +10,7 @@ module.exports = {
     ignore: [
       'build',
       'dist/server/_internal/models',
-      'services',
+      'app',
     ],
   },
   rebuildConfig: {},
