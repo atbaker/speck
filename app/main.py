@@ -4,11 +4,13 @@ from sqlmodel import SQLModel
 from config import engine
 from emails import models
 from emails import routes as email_routes
+from setup import routes as setup_routes
 
 
 app = FastAPI()
 
 app.include_router(email_routes.router)
+app.include_router(setup_routes.router)
 
 # Create the database tables
 SQLModel.metadata.create_all(engine)

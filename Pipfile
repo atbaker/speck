@@ -15,6 +15,7 @@ pydantic = "*"
 pydantic-settings = "*"
 sqlmodel = "*"
 uvicorn = "*"
+tqdm = "*"
 
 [dev-packages]
 pyinstaller = "*"

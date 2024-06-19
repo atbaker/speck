@@ -36,9 +36,9 @@ speck_exe = EXE(
 worker_analysis = Analysis(
     ['app/worker.py'],
     pathex=['./app'],
-    binaries=[],
+    binaries=[('./app/data/llamafile', 'data')],
     datas=[('./app/data/worker/broker/.keep', 'data/worker/broker')],
-    hiddenimports=['config', 'emails.tasks'],
+    hiddenimports=['config', 'emails.tasks', 'setup.tasks'],
     hookspath=['./app/hooks'],
     hooksconfig={},
     runtime_hooks=[],
