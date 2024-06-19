@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from sqlmodel import SQLModel
 
-from app.config import engine
-from app.emails import models
-from app.emails import routes as email_routes
+from config import engine
+from emails import models
+from emails import routes as email_routes
 
 
 app = FastAPI()

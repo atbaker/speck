@@ -1,15 +1,7 @@
-from huey.bin.huey_consumer import consumer_main
-import sys
+from config import celery_app
 
-# Adapted from https://github.com/coleifer/huey/blob/master/huey/bin/huey_consumer.py
+# https://stackoverflow.com/questions/67023208/run-celery-worker-with-a-compiled-python-module-compiled-using-pyinstaller
 if __name__ == '__main__':
-    # Add the path to our huey object manually
-    sys.argv.append('app.config.huey')
-
-    if sys.version_info >= (3, 8) and sys.platform == 'darwin':
-        import multiprocessing
-        try:
-            multiprocessing.set_start_method('fork')
-        except RuntimeError:
-            pass
-    consumer_main()
+    celery_app.worker_main(
+        argv=['worker', '--beat', '--loglevel=info', '--concurrency=1']
+    )

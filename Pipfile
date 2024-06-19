@@ -4,16 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+celery = "*"
 fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
-keyring = "*"
 huggingface-hub = "*"
+keyring = "*"
 llama-cpp-python = "*"
-sqlmodel = "*"
 pydantic-settings = "*"
+sqlmodel = "*"
 tqdm = "*"
-huey = "*"
 
 [dev-packages]
 pyinstaller = "*"

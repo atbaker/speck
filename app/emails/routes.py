@@ -56,5 +56,5 @@ async def store_oauth_tokens(token_data: TokenData):
 
 @router.get('/test-send-email')
 async def test_send_email():
-    send_email()
+    send_email.delay()
     return {"status": "success"}
