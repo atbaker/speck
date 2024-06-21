@@ -36,6 +36,8 @@ class LLMServerManager:
             '--nobrowser',
             '--port',
             '7726',
+            '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU
+            '9999',
             '--model',
             model_path
         ]
