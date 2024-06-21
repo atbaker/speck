@@ -5,17 +5,17 @@ name = "pypi"
 
 [packages]
 celery = "*"
+diskcache = "*"
 fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
 huggingface-hub = "*"
 keyring = "*"
-llama-cpp-python = "*"
 pydantic = "*"
 pydantic-settings = "*"
 sqlmodel = "*"
-uvicorn = "*"
 tqdm = "*"
+uvicorn = "*"
 
 [dev-packages]
 pyinstaller = "*"

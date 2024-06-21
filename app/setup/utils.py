@@ -1,6 +1,5 @@
 import os
 import requests
-import subprocess
 from tqdm import tqdm
 
 from config import settings
@@ -19,7 +18,7 @@ def download_file(url, output_path, chunk_size=1024*1024):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Get the size of the file to be downloaded
-    response = requests.head(url)
+    response = requests.get(url, stream=True)
     file_size = int(response.headers.get('content-length', 0))
     print(f"File size: {file_size / (1024 * 1024):.2f} MB")
 
@@ -46,21 +45,3 @@ def download_file(url, output_path, chunk_size=1024*1024):
 
     progress.close()
     print("Download completed.")
-
-
-def start_model_server():
-    """Use Llamafile to start a server to use for inference."""
-    llamafile_path = os.path.join(settings.data_dir, 'llamafile')
-    model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
-
-    try:
-        process = subprocess.Popen(
-                ['sh', llamafile_path, '--server', '--nobrowser', '--port', '7726', '--model', model_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-        )
-        return process
-    except Exception as e:
-        print(f"Error starting model server: {e}")
-        return None

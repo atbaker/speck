@@ -1,5 +1,6 @@
 from celery import Celery
 import os
+from diskcache import Cache
 from pydantic_settings import BaseSettings
 from sqlmodel import create_engine
 import sys
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = f'sqlite:///{os.path.join(data_dir, "speck.db")}'
 
+    # Cache
+    cache_dir: str = os.path.join(data_dir, 'cache')
+
     # Celery
     celery_dir: str = os.path.join(data_dir, 'worker')
     celery_backend_url: str = f'db+sqlite:///{os.path.join(celery_dir, "worker.db")}'
@@ -25,12 +29,16 @@ class Settings(BaseSettings):
     celery_control_folder: str = os.path.join(celery_dir, 'control')
     celery_beat_schedule_filename: str = os.path.join(celery_dir, 'scheduler')
 
-    # Models
+    # LLM server
+    llamafile_exe_path: str = os.path.join(data_dir, 'llamafile')
+    llm_server_state_path: str = os.path.join(data_dir, 'llm_server_state.json')
     models_dir: str = os.path.join(data_dir, 'models')
 
 settings = Settings()
 
 engine = create_engine(settings.database_url, echo=True)
+
+cache = Cache(directory=settings.cache_dir)
 
 celery_app = Celery(
     'app',
