@@ -5,11 +5,11 @@ module.exports = {
   packagerConfig: {
     asar: true,
     extraResource: [
-      'dist/server',
+      'dist/speck',
     ],
     ignore: [
       'build',
-      'dist/server/_internal/models',
+      'dist/speck/_internal/models',
       'app',
     ],
   },

@@ -44,22 +44,29 @@ app.whenReady().then(() => {
 
   if (app.isPackaged) {
     const serverExecutable = process.platform === 'win32'
-    ? path.join(__dirname, '../..', 'server', 'server.exe')
-    : path.join(__dirname, '../..', 'server', 'server');
+      ? path.join(__dirname, '../..', 'speck', 'speck.exe')
+      : path.join(__dirname, '../..', 'speck', 'speck');
 
-    serverProcess = execFile(serverExecutable, (error, stdout, stderr) => {
-      if (error) {
-        log.error(`Error: ${error.message}`);
-        return;
-      }
-      if (stderr) {
-        log.error(`stderr: ${stderr}`);
-        return;
-      }
-      log.log(`stdout: ${stdout}`);
+    serverProcess = execFile(serverExecutable, {
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    // Log stdout
+    serverProcess.stdout.on('data', (data) => {
+      log.info(data.toString());
+    });
+
+    // Log stderr
+    serverProcess.stderr.on('data', (data) => {
+      log.error(data.toString());
+    });
+
+    serverProcess.on('close', (code) => {
+      log.info(`Server process exited with code ${code}`);
+    });
+
   } else {
-      log.info('Skipping server start in development mode')
+    log.info('Skipping server start in development mode');
   }
 });
 
@@ -75,16 +82,15 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Function to send OAuth tokens to the FastAPI server
-async function storeOAuthTokens(accessToken, refreshToken) {
+// Function to send a Google OAuth code to the FastAPI server for processing
+async function forwardOAuthCode(code) {
   try {
-    const response = await axios.post('http://127.0.0.1:7725/store-oauth-tokens', {
-      access_token: accessToken,
-      refresh_token: refreshToken
+    const response = await axios.post('http://127.0.0.1:7725/receive-oauth-code', {
+      code: code
     });
-    console.log('Tokens stored successfully:', response.data);
+    log.info('OAuth code processed successfully:', response.data);
   } catch (error) {
-    console.error('Error storing tokens:', error);
+    log.error('Error processing OAuth code:', error);
   }
 }
 
@@ -93,7 +99,8 @@ app.on('open-url', (event, url) => {
   log.info('open-url event triggered')
   event.preventDefault();
   const parsedUrl = new URL(url);
-  const accessToken = parsedUrl.searchParams.get('access_token');
-  const refreshToken = parsedUrl.searchParams.get('refresh_token');
-  storeOAuthTokens(accessToken, refreshToken);
+  if (parsedUrl.pathname === '/receive-oauth-code') {
+    const code = parsedUrl.searchParams.get('code');
+    forwardOAuthCode(code);
+  }
 });

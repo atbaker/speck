@@ -11,12 +11,16 @@ class Settings(BaseSettings):
     app_name: str = "Speck"
     os_name: str = platform.system()
 
+    # Determine whether we're packaged in PyInstaller or not
     if hasattr(sys, '_MEIPASS'):
         base_dir: str = sys._MEIPASS
         data_dir: str = os.path.join(base_dir, 'data')
     else:
         base_dir: str = os.path.dirname(os.path.abspath(__file__))
         data_dir: str = os.path.join(base_dir, 'data')
+
+    # Logging
+    log_dir: str = os.path.join(data_dir, 'logs')
 
     # Database
     database_url: str = f'sqlite:///{os.path.join(data_dir, "speck.db")}'
@@ -40,8 +44,15 @@ class Settings(BaseSettings):
     if os_name == 'Windows':
         llamafile_exe_path += '.exe'
 
-    # Logging
-    log_dir: str = os.path.join(data_dir, 'logs')
+    # Google OAuth
+    gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
+    gcp_client_secret: str = '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'
+    gcp_auth_uri: str = 'https://accounts.google.com/o/oauth2/auth'
+    gcp_redirect_uri: str = 'https://atbaker.ngrok.io/receive-oauth-code'
+    gcp_token_uri: str = 'https://oauth2.googleapis.com/token'
+    gcp_oauth_scopes: list = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+]
 
 settings = Settings()
 os.makedirs(settings.log_dir, exist_ok=True)
