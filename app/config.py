@@ -1,6 +1,7 @@
 from celery import Celery
 import os
 from diskcache import Cache
+import platform
 from pydantic_settings import BaseSettings
 from sqlmodel import create_engine
 import sys
@@ -8,6 +9,7 @@ import sys
 
 class Settings(BaseSettings):
     app_name: str = "Speck"
+    os_name: str = platform.system()
 
     if hasattr(sys, '_MEIPASS'):
         base_dir: str = sys._MEIPASS
@@ -30,11 +32,19 @@ class Settings(BaseSettings):
     celery_beat_schedule_filename: str = os.path.join(celery_dir, 'scheduler')
 
     # LLM server
-    llamafile_exe_path: str = os.path.join(data_dir, 'llamafile')
     llm_server_state_path: str = os.path.join(data_dir, 'llm_server_state.json')
     models_dir: str = os.path.join(data_dir, 'models')
 
+    llamafile_exe_path: str = os.path.join(data_dir, 'llamafile')
+    # Append a ".exe" extension if on Windows
+    if os_name == 'Windows':
+        llamafile_exe_path += '.exe'
+
+    # Logging
+    log_dir: str = os.path.join(data_dir, 'logs')
+
 settings = Settings()
+os.makedirs(settings.log_dir, exist_ok=True)
 
 engine = create_engine(settings.database_url, echo=True)
 

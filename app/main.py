@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlmodel import SQLModel
 
-from config import engine
+from config import cache, engine
 from emails import models
 from emails import routes as email_routes
 from setup import routes as setup_routes
@@ -18,6 +18,9 @@ async def lifespan(app: FastAPI):
 
     # Create the database tables
     SQLModel.metadata.create_all(engine)
+
+    # Clear the cache
+    cache.clear()
 
     # Allow FastAPI to start up
     yield

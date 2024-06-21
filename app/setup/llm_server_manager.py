@@ -11,6 +11,9 @@ class LLMServerManager:
     def __init__(self):
         self.lock = threading.Lock()
 
+        self.stdout_log = None
+        self.stderr_log = None
+
     def _read_state(self):
         state = cache.get('llm_server_state')
 
@@ -24,11 +27,27 @@ class LLMServerManager:
     def start_llamafile_process(self):
         model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
 
+        self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
+        self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
+
+        llamafile_process_args = [
+            settings.llamafile_exe_path,
+            '--server',
+            '--nobrowser',
+            '--port',
+            '7726',
+            '--model',
+            model_path
+        ]
+
+        if settings.os_name == 'Darwin':
+            llamafile_process_args = ['sh'] + llamafile_process_args
+
         try:
             process = subprocess.Popen(
-                ['sh', settings.llamafile_exe_path, '--server', '--nobrowser', '--port', '7726', '--model', model_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                llamafile_process_args,
+                stdout=self.stdout_log,
+                stderr=self.stderr_log,
                 text=True
             )
 
@@ -83,6 +102,8 @@ class LLMServerManager:
                 except ProcessLookupError:
                     print("Server process not found.")
 
+            self.stdout_log.close()
+            self.stderr_log.close()
             self._write_state(state)
 
     def force_stop_server(self):
@@ -100,6 +121,9 @@ class LLMServerManager:
                     print("Server forcefully stopped.")
                 except ProcessLookupError:
                     print("Server process not found.")
+
+            self.stdout_log.close()
+            self.stderr_log.close()
             self._write_state(state)
 
     def _is_process_running(self, pid):
