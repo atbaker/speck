@@ -9,7 +9,6 @@ module.exports = {
     ],
     ignore: [
       'build',
-      'dist/speck/_internal/models',
       'app',
     ],
   },

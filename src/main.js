@@ -5,10 +5,65 @@ const { execFile } = require('child_process');
 const { URL } = require('url');
 const log = require('electron-log');
 
+// Use the user application data directory for the log path
+log.transports.file.resolvePathFn = (variables) => {
+  return path.join(app.getPath('userData'), 'logs', variables.fileName);
+}
+
 log.initialize();
 log.info('Starting Speck...');
 
 let serverProcess;
+let workerProcess;
+
+const createLogger = (name, fileName) => {
+  const logger = log.create(name);
+  logger.transports.file.resolvePathFn = (variables) => {
+    return path.join(app.getPath('userData'), 'logs', fileName);
+  };
+  return logger;
+};
+
+const launchProcess = (executableName, logFileName) => {
+  const logger = createLogger(executableName, logFileName);
+
+  log.info(path.join(app.getAppPath(), '../speck', executableName));
+  const executablePath = process.platform === 'win32'
+    ? path.join(app.getAppPath(), '../speck', `${executableName}.exe`)
+    : path.join(app.getAppPath(), '../speck', executableName);
+
+  const args = [`--user-data-dir=${app.getPath('userData')}`];
+  let processInstance;
+
+  try {
+    processInstance = execFile(executablePath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    if (processInstance.pid) {
+      log.info(`${executableName} process started with PID: ${processInstance.pid}`);
+    } else {
+      throw new Error(`${executableName} process failed to start`);
+    }
+
+    processInstance.stdout.on('data', (data) => {
+      logger.info(data.toString());
+    });
+
+    processInstance.stderr.on('data', (data) => {
+      logger.error(data.toString());
+    });
+
+    processInstance.on('close', (code) => {
+      logger.info(`${executableName} process exited with code ${code}`);
+    });
+
+  } catch (error) {
+    log.error(`Failed to start ${executableName} process: ${error.message}`);
+  }
+
+  return processInstance;
+};
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -31,6 +86,8 @@ app.whenReady().then(() => {
     return tokens;
   });
 
+  log.info("User data path: ", app.getPath('userData'));
+
   createWindow();
 
   app.on('activate', () => {
@@ -43,36 +100,21 @@ app.whenReady().then(() => {
   app.setAsDefaultProtocolClient('speck');
 
   if (app.isPackaged) {
-    const serverExecutable = process.platform === 'win32'
-      ? path.join(__dirname, '../..', 'speck', 'speck.exe')
-      : path.join(__dirname, '../..', 'speck', 'speck');
-
-    serverProcess = execFile(serverExecutable, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    // Log stdout
-    serverProcess.stdout.on('data', (data) => {
-      log.info(data.toString());
-    });
-
-    // Log stderr
-    serverProcess.stderr.on('data', (data) => {
-      log.error(data.toString());
-    });
-
-    serverProcess.on('close', (code) => {
-      log.info(`Server process exited with code ${code}`);
-    });
-
+    serverProcess = launchProcess('speck-server', 'server.log');
+    workerProcess = launchProcess('speck-worker', 'worker.log');
   } else {
-    log.info('Skipping server start in development mode');
+    log.info('Skipping server and worker start in development mode');
   }
 });
 
 app.on('before-quit', () => {
   if (serverProcess) {
-    serverProcess.kill()
+    log.info('Killing server process...');
+    serverProcess.kill();
+  }
+  if (workerProcess) {
+    log.info('Killing worker process...');
+    workerProcess.kill();
   }
 });
 

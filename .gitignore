@@ -1,6 +1,7 @@
 ### speck-app
 app/models
 app/data
+app/llamafile
 
 ### Node template
 

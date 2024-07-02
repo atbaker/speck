@@ -1,3 +1,4 @@
+import argparse
 from celery import Celery
 import os
 from diskcache import Cache
@@ -7,39 +8,54 @@ from sqlmodel import create_engine
 import sys
 
 
+# Determine our base directory based on whether we're packaged in PyInstaller or not
+if hasattr(sys, '_MEIPASS'):
+    BASE_DIR: str = sys._MEIPASS
+else:
+    BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(
+    prog='Speck',
+    description='Start the Speck client'
+)
+parser.add_argument(
+    '--user-data-dir',
+    type=str,
+    default=BASE_DIR, # Use a local directory during dev
+    help='The user data directory path.',
+)
+args = parser.parse_args()
+
+
 class Settings(BaseSettings):
     app_name: str = "Speck"
     os_name: str = platform.system()
 
-    # Determine whether we're packaged in PyInstaller or not
-    if hasattr(sys, '_MEIPASS'):
-        base_dir: str = sys._MEIPASS
-        data_dir: str = os.path.join(base_dir, 'data')
-    else:
-        base_dir: str = os.path.dirname(os.path.abspath(__file__))
-        data_dir: str = os.path.join(base_dir, 'data')
+    app_data_dir: str = args.user_data_dir
+    speck_data_dir: str = os.path.join(app_data_dir, 'data')
 
     # Logging
-    log_dir: str = os.path.join(data_dir, 'logs')
+    log_dir: str = os.path.join(app_data_dir, 'logs')
 
     # Database
-    database_url: str = f'sqlite:///{os.path.join(data_dir, "speck.db")}'
+    database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
 
     # Cache
-    cache_dir: str = os.path.join(data_dir, 'cache')
+    cache_dir: str = os.path.join(speck_data_dir, 'cache')
 
     # Celery
-    celery_dir: str = os.path.join(data_dir, 'worker')
+    celery_dir: str = os.path.join(speck_data_dir, 'worker')
     celery_backend_url: str = f'db+sqlite:///{os.path.join(celery_dir, "worker.db")}'
     celery_broker_dir: str = os.path.join(celery_dir, 'broker')
     celery_control_folder: str = os.path.join(celery_dir, 'control')
     celery_beat_schedule_filename: str = os.path.join(celery_dir, 'scheduler')
 
     # LLM server
-    llm_server_state_path: str = os.path.join(data_dir, 'llm_server_state.json')
-    models_dir: str = os.path.join(data_dir, 'models')
+    llm_server_state_path: str = os.path.join(speck_data_dir, 'llm_server_state.json')
+    models_dir: str = os.path.join(speck_data_dir, 'models')
 
-    llamafile_exe_path: str = os.path.join(data_dir, 'llamafile')
+    llamafile_exe_path: str = os.path.join(BASE_DIR, 'llamafile')
     # Append a ".exe" extension if on Windows
     if os_name == 'Windows':
         llamafile_exe_path += '.exe'
@@ -55,7 +71,10 @@ class Settings(BaseSettings):
 ]
 
 settings = Settings()
+
+# Make sure the log and celery directories exist
 os.makedirs(settings.log_dir, exist_ok=True)
+os.makedirs(settings.celery_broker_dir, exist_ok=True)
 
 engine = create_engine(settings.database_url, echo=True)
 
