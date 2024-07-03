@@ -6,15 +6,15 @@ from config import cache, engine
 from emails import models
 from emails import routes as email_routes
 from setup import routes as setup_routes
-from setup.llm_server_manager import llm_server_manager
-from setup.tasks import set_up_llm_server
+from app.setup.llm_service_manager import llm_service_manager
+from setup.tasks import set_up_llm_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for the app."""
     # Schedule a task to set up the LLM server
-    set_up_llm_server.delay()
+    set_up_llm_service.delay()
 
     # Create the database tables
     SQLModel.metadata.create_all(engine)
@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
     # Allow FastAPI to start up
     yield
 
-    # Force stop the LLM server before shutdown
-    llm_server_manager.force_stop_server()
+    # Force stop the LLM service before shutdown
+    llm_service_manager.force_stop_server()
 
 
 app = FastAPI(lifespan=lifespan)

@@ -6,9 +6,9 @@ from .utils import download_file
 
 
 @celery_app.task
-def set_up_llm_server():
+def set_up_llm_service():
     """
-    A task run on startup to prepare the LLM server.
+    A task run on startup to prepare the LLM service.
 
     For now, simply ensures the model file is downloaded and ready.
     """
@@ -17,4 +17,4 @@ def set_up_llm_server():
     output_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
     download_file(url, output_path)
 
-    print('LLM setup complete')
+    print('LLM service setup complete')

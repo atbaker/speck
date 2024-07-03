@@ -15,6 +15,7 @@ log.info('Starting Speck...');
 
 let serverProcess;
 let workerProcess;
+let schedulerProcess;
 
 const createLogger = (name, fileName) => {
   const logger = log.create(name);
@@ -27,10 +28,9 @@ const createLogger = (name, fileName) => {
 const launchProcess = (executableName, logFileName) => {
   const logger = createLogger(executableName, logFileName);
 
-  log.info(path.join(app.getAppPath(), '../speck', executableName));
   const executablePath = process.platform === 'win32'
-    ? path.join(app.getAppPath(), '../speck', `${executableName}.exe`)
-    : path.join(app.getAppPath(), '../speck', executableName);
+    ? path.join(app.getAppPath(), '../services', `${executableName}.exe`)
+    : path.join(app.getAppPath(), '../services', executableName);
 
   const args = [`--user-data-dir=${app.getPath('userData')}`];
   let processInstance;
@@ -102,6 +102,7 @@ app.whenReady().then(() => {
   if (app.isPackaged) {
     serverProcess = launchProcess('speck-server', 'server.log');
     workerProcess = launchProcess('speck-worker', 'worker.log');
+    schedulerProcess = launchProcess('speck-scheduler', 'scheduler.log');
   } else {
     log.info('Skipping server and worker start in development mode');
   }
@@ -115,6 +116,10 @@ app.on('before-quit', () => {
   if (workerProcess) {
     log.info('Killing worker process...');
     workerProcess.kill();
+  }
+  if (schedulerProcess) {
+    log.info('Killing scheduler process...');
+    schedulerProcess.kill();
   }
 });
 

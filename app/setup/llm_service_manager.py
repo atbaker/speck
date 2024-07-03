@@ -7,7 +7,7 @@ import requests
 from config import cache, settings
 
 
-class LLMServerManager:
+class LLMServiceManager:
     def __init__(self):
         self.lock = threading.Lock()
 
@@ -15,14 +15,14 @@ class LLMServerManager:
         self.stderr_log = None
 
     def _read_state(self):
-        state = cache.get('llm_server_state')
+        state = cache.get('llm_service_state')
 
         if state is None:
             return {"pid": None, "usage_count": 0}
         return state
 
     def _write_state(self, state):
-        cache.set('llm_server_state', state)
+        cache.set('llm_service_state', state)
 
     def start_llamafile_process(self):
         model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
@@ -135,4 +135,4 @@ class LLMServerManager:
             return False
         return True
 
-llm_server_manager = LLMServerManager()
+llm_service_manager = LLMServiceManager()

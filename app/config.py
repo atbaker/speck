@@ -52,7 +52,6 @@ class Settings(BaseSettings):
     celery_beat_schedule_filename: str = os.path.join(celery_dir, 'scheduler')
 
     # LLM server
-    llm_server_state_path: str = os.path.join(speck_data_dir, 'llm_server_state.json')
     models_dir: str = os.path.join(speck_data_dir, 'models')
 
     llamafile_exe_path: str = os.path.join(BASE_DIR, 'llamafile')
