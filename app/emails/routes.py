@@ -8,10 +8,12 @@ import logging
 from pydantic import BaseModel
 from urllib.parse import urlencode
 import secrets
+from sqlalchemy.exc import NoResultFound
+from sqlmodel import select, Session
 
-from config import cache, settings
+from config import settings, get_db_session
 
-from .tasks import send_email
+from .models import Mailbox
 from .utils import get_gmail_api_client
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,7 @@ class OAuthCodeData(BaseModel):
 
 
 @router.post('/receive-oauth-code')
-async def receive_oauth_code(codeData: OAuthCodeData):
+async def receive_oauth_code(*, session: Session = Depends(get_db_session), codeData: OAuthCodeData):
     oauth_code = codeData.code
 
     # Exchange the code for access and refresh tokens
@@ -68,9 +70,7 @@ async def receive_oauth_code(codeData: OAuthCodeData):
             }
         )
 
-        print(response)
         token_data = response.json()
-        print(token_data)
 
     # Store the tokens with keyring
     keyring.set_password('Speck', 'google_oauth_access_token', token_data['access_token'])
@@ -79,10 +79,25 @@ async def receive_oauth_code(codeData: OAuthCodeData):
     # And remove our code_verifier
     keyring.delete_password('Speck', 'google_oauth_code_verifier')
 
+    # Finally, fetch the user's profile info and get or create their Mailbox
+    client = get_gmail_api_client()
+    user_profile = client.users().getProfile(userId='me').execute()
+    email_address = user_profile['emailAddress']
+
+    try:
+        mailbox = session.exec(
+            select(Mailbox).where(Mailbox.email_address == email_address)
+        ).one()
+    except NoResultFound:
+        mailbox = Mailbox(email_address=email_address)
+        session.add(mailbox)
+        session.commit()
+
     return {"status": "success", "access_token": token_data['access_token'], "refresh_token": token_data['refresh_token']}
 
 
-@router.get('/test-send-email')
-async def test_send_email():
-    send_email.delay()
+@router.get('/test-sync-inbox')
+async def test_sync_inbox(*, session: Session = Depends(get_db_session)):
+    mailbox = session.exec(select(Mailbox)).one()
+    mailbox.sync_inbox(session=session)
     return {"status": "success"}

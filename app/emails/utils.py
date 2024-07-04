@@ -1,6 +1,9 @@
 import googleapiclient.discovery
 import google.oauth2.credentials
 import keyring
+import pendulum
+
+from config import settings, cache
 
 
 def _get_user_credentials():
@@ -13,10 +16,26 @@ def _get_user_credentials():
 
     return google.oauth2.credentials.Credentials(
         token=access_token,
+        refresh_token=refresh_token,
+        token_uri=settings.gcp_token_uri,
+        client_id=settings.gcp_client_id,
+        client_secret=settings.gcp_client_secret,
+        scopes=settings.gcp_oauth_scopes,
     )
 
 
 def get_gmail_api_client():
-    """Get the Gmail API client."""
+    """
+    Get the Gmail API client and make one API request to
+    refresh the access token.
+    """
     credentials = _get_user_credentials()
-    return googleapiclient.discovery.build('gmail', 'v1', credentials=credentials)
+    client = googleapiclient.discovery.build('gmail', 'v1', credentials=credentials)
+
+    # Make a request to refresh the access token
+    client.users().getProfile(userId='me').execute()
+
+    # Store our refreshed access token in the keyring
+    keyring.set_password('Speck', 'google_oauth_access_token', credentials.token)
+
+    return client

@@ -1,10 +1,11 @@
 import argparse
 from celery import Celery
+from celery.schedules import crontab
 import os
 from diskcache import Cache
 import platform
 from pydantic_settings import BaseSettings
-from sqlmodel import create_engine
+from sqlmodel import Session, create_engine
 import sys
 
 
@@ -75,13 +76,23 @@ settings = Settings()
 os.makedirs(settings.log_dir, exist_ok=True)
 os.makedirs(settings.celery_broker_dir, exist_ok=True)
 
-engine = create_engine(settings.database_url, echo=True)
+db_engine = create_engine(settings.database_url, echo=True)
+
+def get_db_session():
+    with Session(db_engine) as session:
+        yield session
 
 cache = Cache(directory=settings.cache_dir)
 
 celery_app = Celery(
     'app',
     backend=settings.celery_backend_url,
+    beat_schedule={
+        'sync-inbox-every-minute': {
+            'task': 'emails.tasks.sync_inbox',
+            'schedule': crontab(minute='*/1'),
+        },
+    },
     beat_schedule_filename=settings.celery_beat_schedule_filename,
     broker_url='filesystem://',
     broker_transport_options={

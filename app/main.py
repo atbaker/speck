@@ -2,11 +2,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlmodel import SQLModel
 
-from config import cache, engine
+from config import cache, db_engine
 from emails import models
 from emails import routes as email_routes
 from setup import routes as setup_routes
-from app.setup.llm_service_manager import llm_service_manager
+from setup.llm_service_manager import llm_service_manager
 from setup.tasks import set_up_llm_service
 
 
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     set_up_llm_service.delay()
 
     # Create the database tables
-    SQLModel.metadata.create_all(engine)
+    SQLModel.metadata.create_all(db_engine)
 
     # Clear the cache
     cache.clear()
