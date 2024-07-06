@@ -25,7 +25,7 @@ router = APIRouter()
 async def start_oauth():
     # Generate a code_verifier and store it with keyring
     code_verifier = secrets.token_urlsafe(128)
-    keyring.set_password('Speck', 'google_oauth_code_verifier', code_verifier)
+    keyring.set_password(settings.app_name, 'google_oauth_code_verifier', code_verifier)
 
     # Hash and encode the code_verifier into a code_challenge
     hashed_verifier = hashlib.sha256(code_verifier.encode()).digest()
@@ -66,18 +66,18 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
                 'redirect_uri': settings.gcp_redirect_uri,
                 'grant_type': 'authorization_code',
                 'code': oauth_code,
-                'code_verifier': keyring.get_password('Speck', 'google_oauth_code_verifier'),
+                'code_verifier': keyring.get_password(settings.app_name, 'google_oauth_code_verifier'),
             }
         )
 
         token_data = response.json()
 
     # Store the tokens with keyring
-    keyring.set_password('Speck', 'google_oauth_access_token', token_data['access_token'])
-    keyring.set_password('Speck', 'google_oauth_refresh_token', token_data['refresh_token'])
+    keyring.set_password(settings.app_name, 'google_oauth_access_token', token_data['access_token'])
+    keyring.set_password(settings.app_name, 'google_oauth_refresh_token', token_data['refresh_token'])
 
     # And remove our code_verifier
-    keyring.delete_password('Speck', 'google_oauth_code_verifier')
+    keyring.delete_password(settings.app_name, 'google_oauth_code_verifier')
 
     # Finally, fetch the user's profile info and get or create their Mailbox
     client = get_gmail_api_client()

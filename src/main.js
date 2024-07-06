@@ -25,25 +25,27 @@ const createLogger = (name, fileName) => {
   return logger;
 };
 
-const launchProcess = (executableName, logFileName) => {
-  const logger = createLogger(executableName, logFileName);
+const launchProcess = (processType, logFileName) => {
+  const logger = createLogger(processType, logFileName);
 
   const executablePath = process.platform === 'win32'
-    ? path.join(app.getAppPath(), '../services', `${executableName}.exe`)
-    : path.join(app.getAppPath(), '../services', executableName);
+    ? path.join(app.getAppPath(), '../speck', 'speck.exe')
+    : path.join(app.getAppPath(), '../speck', 'speck');
 
-  const args = [`--user-data-dir=${app.getPath('userData')}`];
+  const args = [processType, `--user-data-dir=${app.getPath('userData')}`];
+  const options = {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    execArgv: [`--title=speck ${processType}`] // Set the process title
+  };
   let processInstance;
 
   try {
-    processInstance = execFile(executablePath, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    processInstance = execFile(executablePath, args, options);
 
     if (processInstance.pid) {
-      log.info(`${executableName} process started with PID: ${processInstance.pid}`);
+      log.info(`speck ${processType} process started with PID: ${processInstance.pid}`);
     } else {
-      throw new Error(`${executableName} process failed to start`);
+      throw new Error(`speck ${processType} process failed to start`);
     }
 
     processInstance.stdout.on('data', (data) => {
@@ -55,11 +57,11 @@ const launchProcess = (executableName, logFileName) => {
     });
 
     processInstance.on('close', (code) => {
-      logger.info(`${executableName} process exited with code ${code}`);
+      logger.info(`speck ${processType} process exited with code ${code}`);
     });
 
   } catch (error) {
-    log.error(`Failed to start ${executableName} process: ${error.message}`);
+    log.error(`Failed to start speck ${processType} process: ${error.message}`);
   }
 
   return processInstance;
@@ -100,11 +102,11 @@ app.whenReady().then(() => {
   app.setAsDefaultProtocolClient('speck');
 
   if (app.isPackaged) {
-    serverProcess = launchProcess('speck-server', 'server.log');
-    workerProcess = launchProcess('speck-worker', 'worker.log');
-    schedulerProcess = launchProcess('speck-scheduler', 'scheduler.log');
+    serverProcess = launchProcess('server', 'server.log');
+    workerProcess = launchProcess('worker', 'worker.log');
+    schedulerProcess = launchProcess('scheduler', 'scheduler.log');
   } else {
-    log.info('Skipping server and worker start in development mode');
+    log.info('Skipping server, worker, and scheduler start in development mode');
   }
 });
 

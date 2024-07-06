@@ -3,6 +3,7 @@ import subprocess
 import threading
 import time
 import requests
+from functools import wraps
 
 from config import cache, settings
 
@@ -25,7 +26,7 @@ class LLMServiceManager:
         cache.set('llm_service_state', state)
 
     def start_llamafile_process(self):
-        model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
+        model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
 
         self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
         self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
@@ -38,6 +39,8 @@ class LLMServiceManager:
             '7726',
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU
             '9999',
+            '--ctx-size',
+            '8192', # 8k context window for Llama 3
             '--model',
             model_path
         ]
@@ -136,3 +139,19 @@ class LLMServiceManager:
         return True
 
 llm_service_manager = LLMServiceManager()
+
+def use_inference_service(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        pid = llm_service_manager.start_server()
+        if not pid:
+            raise RuntimeError("Failed to start the inference service.")
+        
+        try:
+            result = func(*args, **kwargs)
+        finally:
+            threading.Timer(30, llm_service_manager.stop_server).start()
+        
+        return result
+    
+    return wrapper

@@ -1,8 +1,44 @@
+import instructor
+from openai import OpenAI
 import os
+from pydantic import BaseModel
 import requests
 from tqdm import tqdm
 
-from config import settings
+
+def run_instructor_completion(
+    model: BaseModel,
+    prompt: str,
+    system_prompt: str = 'You write concise summaries of emails.'
+) -> str:
+    """Uses Instructor to run a completion for a given model and message."""
+    # Patch the OpenAI client
+    openai_connection = OpenAI(
+        base_url='http://localhost:7726/v1',
+        api_key='sk-no-key-required'
+    )
+    client = instructor.from_openai(
+        openai_connection,
+        mode=instructor.Mode.JSON
+    )
+
+    # Run the inference
+    result, completion = client.chat.completions.create_with_completion(
+        model="LLaMA_CPP",
+        response_model=model,
+        messages=[
+            {
+                'role': 'system',
+                'content': system_prompt
+            },
+            {
+                'role': 'user',
+                'content': prompt
+            }
+        ],
+    )
+
+    return result
 
 
 def download_file(url, output_path, chunk_size=1024*1024):

@@ -10,12 +10,16 @@ fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
 httpx = "*"
+instructor = "*"
 keyring = "*"
+openai = "*"
 pendulum = "*"
+psutil = "*" # Missing dependency for unstructured
 pydantic = "*"
 pydantic-settings = "*"
 sqlmodel = "*"
 tqdm = "*"
+unstructured = "*"
 uvicorn = "*"
 
 [dev-packages]

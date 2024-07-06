@@ -12,10 +12,12 @@ import sys
 # Determine our base directory based on whether we're packaged in PyInstaller or not
 if hasattr(sys, '_MEIPASS'):
     BASE_DIR: str = sys._MEIPASS
+    APP_NAME: str = 'Speck'
 else:
     BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
+    APP_NAME: str = 'Speck (dev)'
 
-# Parse command-line arguments
+# Parse command-line arguments, ignoring unknown ones
 parser = argparse.ArgumentParser(
     prog='Speck',
     description='Start the Speck client'
@@ -26,11 +28,11 @@ parser.add_argument(
     default=BASE_DIR, # Use a local directory during dev
     help='The user data directory path.',
 )
-args = parser.parse_args()
+args, unknown = parser.parse_known_args()
 
 
 class Settings(BaseSettings):
-    app_name: str = "Speck"
+    app_name: str = APP_NAME
     os_name: str = platform.system()
 
     app_data_dir: str = args.user_data_dir
@@ -100,6 +102,5 @@ celery_app = Celery(
         'data_folder_out': settings.celery_broker_dir,
         'control_folder': settings.celery_control_folder,
     },
-    imports=['emails.tasks', 'setup.tasks'],
+    imports=['emails.tasks', 'core.tasks'],
 )
-

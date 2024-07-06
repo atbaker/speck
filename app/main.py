@@ -1,44 +1,36 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from sqlmodel import SQLModel
-
-from config import cache, db_engine
-from emails import models
-from emails import routes as email_routes
-from setup import routes as setup_routes
-from setup.llm_service_manager import llm_service_manager
-from setup.tasks import set_up_llm_service
+import sys
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for the app."""
-    # Schedule a task to set up the LLM server
-    set_up_llm_service.delay()
+def run_server():
+    import uvicorn
+    from server import app
+    uvicorn.run(app, host="127.0.0.1", port=7725)
 
-    # Create the database tables
-    SQLModel.metadata.create_all(db_engine)
+def run_worker():
+    # https://stackoverflow.com/questions/67023208/run-celery-worker-with-a-compiled-python-module-compiled-using-pyinstaller
+    from config import celery_app
+    celery_app.worker_main(
+        argv=['worker', '--loglevel=info', '--pool=threads', '--concurrency=1']
+    )
 
-    # Clear the cache
-    cache.clear()
-
-    # Allow FastAPI to start up
-    yield
-
-    # Force stop the LLM service before shutdown
-    llm_service_manager.force_stop_server()
-
-
-app = FastAPI(lifespan=lifespan)
-
-app.include_router(email_routes.router)
-app.include_router(setup_routes.router)
-
-
-@app.get("/")
-async def hello_world():
-    return {"output": "Hello, world!"}
+def run_scheduler():
+    from config import celery_app
+    celery_app.Beat(loglevel='info').run()
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=7725)
+    if len(sys.argv) < 2:
+        print("Usage: speck [server|worker|scheduler]")
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "server":
+        run_server()
+    elif command == "worker":
+        run_worker()
+    elif command == "scheduler":
+        run_scheduler()
+    else:
+        print(f"Unknown command: {command}")
+        print("Usage: main.py [server|worker|scheduler]")
+        sys.exit(1)

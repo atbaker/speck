@@ -5,13 +5,13 @@ module.exports = {
   packagerConfig: {
     asar: false,
     extraResource: [
-      'dist/services',
+      'dist/speck',
     ],
     ignore: [
       // Source and build code
       'build',
       'app',
-      'dist/services',
+      'dist/speck',
 
       // Miscellaneous
       '.gitignore',
@@ -20,7 +20,7 @@ module.exports = {
       'Pipfile',
       'Pipfile.lock',
       'README.md',
-      'services.spec',
+      'speck.spec',
     ],
   },
   rebuildConfig: {},

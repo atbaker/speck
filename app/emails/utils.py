@@ -1,15 +1,14 @@
 import googleapiclient.discovery
 import google.oauth2.credentials
 import keyring
-import pendulum
 
-from config import settings, cache
+from config import settings
 
 
 def _get_user_credentials():
     """Get the stored user credentials from the keyring library."""
-    access_token = keyring.get_password('Speck', 'google_oauth_access_token')
-    refresh_token = keyring.get_password('Speck', 'google_oauth_refresh_token')
+    access_token = keyring.get_password(settings.app_name, 'google_oauth_access_token')
+    refresh_token = keyring.get_password(settings.app_name, 'google_oauth_refresh_token')
 
     if access_token is None or refresh_token is None:
         raise Exception("No stored credentials found.")
@@ -36,6 +35,6 @@ def get_gmail_api_client():
     client.users().getProfile(userId='me').execute()
 
     # Store our refreshed access token in the keyring
-    keyring.set_password('Speck', 'google_oauth_access_token', credentials.token)
+    keyring.set_password(settings.app_name, 'google_oauth_access_token', credentials.token)
 
     return client
