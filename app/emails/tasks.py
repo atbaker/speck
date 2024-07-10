@@ -3,7 +3,6 @@ from sqlalchemy.exc import NoResultFound
 from sqlmodel import Session, select
 
 from config import celery_app, db_engine
-from core.llm_service_manager import use_inference_service
 
 from .models import Mailbox, Message
 
@@ -29,7 +28,6 @@ def sync_inbox():
 
 
 @celery_app.task
-@use_inference_service
 def generate_message_summary(message_id: int):
     """
     Generate a summary of a message.
@@ -37,7 +35,10 @@ def generate_message_summary(message_id: int):
     with Session(db_engine) as session:
         message = session.exec(select(Message).where(Message.id == message_id)).one()
 
-    # Release the session while we run the inference
+    # If we already have a summary, then do nothing
+    if message.summary:
+        return
+
     message.generate_summary()
 
     with Session(db_engine) as session:

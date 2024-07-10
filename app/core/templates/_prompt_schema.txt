@@ -1,0 +1,9 @@
+<response-format>
+Respond with a JSON object. Here an example of the JSON object you should return:
+
+{
+    {% for prop_name, prop_description in schema['properties'].items() %}
+    "{{ prop_name }}": <your value goes here>{% if not loop.last %},{% endif %} // Field description: {{ prop_description }}
+    {% endfor %}
+}
+</response-format>

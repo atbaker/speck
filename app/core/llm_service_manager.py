@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import threading
@@ -6,6 +7,8 @@ import requests
 from functools import wraps
 
 from config import cache, settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMServiceManager:
@@ -26,7 +29,8 @@ class LLMServiceManager:
         cache.set('llm_service_state', state)
 
     def start_llamafile_process(self):
-        model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
+        # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
+        model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
 
         self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
         self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
@@ -37,10 +41,11 @@ class LLMServiceManager:
             '--nobrowser',
             '--port',
             '7726',
-            '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU
+            '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
+            '--no-mmap', # Gemma 2 has weird behavior when using mmap :shrug:
             '--ctx-size',
-            '8192', # 8k context window for Llama 3
+            '4096', # 4k context window for Gemma 2
             '--model',
             model_path
         ]
@@ -69,11 +74,11 @@ class LLMServiceManager:
 
             # If the server did not become ready in time, kill the process
             process.terminate()
-            print("Error: Model server did not become ready in time.")
+            logger.error("Error: Model server did not become ready in time.")
             return None
 
         except Exception as e:
-            print(f"Error starting model server: {e}")
+            logger.error(f"Error starting model server: {e}")
             return None
 
     def start_server(self):
@@ -103,9 +108,9 @@ class LLMServiceManager:
                     os.kill(state["pid"], 15)  # Terminate the process
                     state["pid"] = None
                     state["usage_count"] = 0
-                    print("Server stopped.")
+                    logger.info("Llamafile server stopped.")
                 except ProcessLookupError:
-                    print("Server process not found.")
+                    logger.error("Tried to stop Llamafile server but process not found.")
 
             self.stdout_log.close()
             self.stderr_log.close()
@@ -123,9 +128,9 @@ class LLMServiceManager:
                         os.kill(state["pid"], 9)  # Forcefully kill the process if still running
                     state["pid"] = None
                     state["usage_count"] = 0
-                    print("Server forcefully stopped.")
+                    logger.info("Llamafile server forcefully stopped.")
                 except ProcessLookupError:
-                    print("Server process not found.")
+                    logger.error("Tried to force stop Llamafile server but process not found.")
 
             self.stdout_log.close()
             self.stderr_log.close()

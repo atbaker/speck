@@ -3,6 +3,7 @@ from celery import Celery
 from celery.schedules import crontab
 import os
 from diskcache import Cache
+from jinja2 import Environment, PackageLoader, PrefixLoader, select_autoescape
 import platform
 from pydantic_settings import BaseSettings
 from sqlmodel import Session, create_engine
@@ -78,14 +79,17 @@ settings = Settings()
 os.makedirs(settings.log_dir, exist_ok=True)
 os.makedirs(settings.celery_broker_dir, exist_ok=True)
 
+# SQLModel
 db_engine = create_engine(settings.database_url, echo=True)
 
 def get_db_session():
     with Session(db_engine) as session:
         yield session
 
+# DiskCache
 cache = Cache(directory=settings.cache_dir)
 
+# Celery
 celery_app = Celery(
     'app',
     backend=settings.celery_backend_url,
@@ -103,4 +107,13 @@ celery_app = Celery(
         'control_folder': settings.celery_control_folder,
     },
     imports=['emails.tasks', 'core.tasks'],
+)
+
+# Jinja2
+template_env = Environment(
+    loader=PrefixLoader({
+        'core': PackageLoader('core', 'templates'),
+        'emails': PackageLoader('emails', 'templates'),
+    }),
+    autoescape=select_autoescape(),
 )

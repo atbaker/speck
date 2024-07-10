@@ -7,10 +7,10 @@ from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlmodel import Column, Field, Session, SQLModel, Relationship, select, delete
 from typing import List
-from unstructured.partition.email import partition_email
+from unstructured.partition.html import partition_html
 
-from config import db_engine
-from core.utils import run_instructor_completion
+from config import db_engine, template_env
+from core.utils import run_llamafile_completion
 
 from .utils import get_gmail_api_client
 
@@ -46,8 +46,8 @@ class Mailbox(SQLModel, table=True):
         new_message_ids = []
         with session or Session(db_engine) as session:
             for message_id in message_ids:
-                # If we have a Message record for this message_id, then assume
-                # the message hasn't changed and skip this record
+                # If we have a Message record for this message_id, then we don't
+                # need to create a new one
                 try:
                     statement = select(
                         Message
@@ -56,6 +56,13 @@ class Mailbox(SQLModel, table=True):
                         Message.mailbox_id == self.id
                     )
                     message = session.exec(statement).one()
+
+                    # If the message hasn't had a summary generated yet,
+                    # schedule it
+                    if message.summary is None:
+                        from .tasks import generate_message_summary
+                        generate_message_summary.delay(message.id)
+
                     continue
                 except NoResultFound:
                     message = Message(
@@ -73,11 +80,11 @@ class Mailbox(SQLModel, table=True):
                     self.last_history_id = message_history_id
 
                 # Convert the raw data into an Email object
+                message.raw = base64.urlsafe_b64decode(response['raw'])
                 email_message = email.message_from_bytes(
-                    base64.urlsafe_b64decode(response['raw']),
+                    message.raw,
                     policy=email.policy.default
                 )
-                message.raw = email_message.as_string()
 
                 # Parse the recipients and the body
                 to_recipients = [recipient.strip() for recipient in email_message['To'].split(',')] if email_message['To'] else []
@@ -98,7 +105,11 @@ class Mailbox(SQLModel, table=True):
                 message.received_at = received_at
 
                 # Use Unstructured to pre-process the body
-                message.process_body()
+                content = email_message.get_body(preferencelist=('html', 'text')).get_content()
+                body_elements = partition_html(
+                    text=content,
+                )
+                message.body = '\n\n'.join([element.text for element in body_elements])
 
                 session.add(message)
 
@@ -140,27 +151,19 @@ class Message(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.now)
 
-    def process_body(self):
-        """Use Unstructured to process the raw email into a clean body."""
-        elements = partition_email(
-            text=self.raw,
-        )
-
-        # Keep things simple for now and just set the body field to
-        # a concatenated string of each element's metadata + text
-        self.body = '\n\n\n'.join([
-            f'{element.metadata.to_dict()}\n\n{element.text}'
-            for element in elements
-        ])
 
     def generate_summary(self):
         """Generate and store a short summary of the message."""
         class MessageSummary(BaseModel):
             summary: str = Field(max_length=80)
 
-        prompt = f'Using the context: {self.body}\n\nSummarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.'
-        result = run_instructor_completion(
-            model=MessageSummary,
-            prompt=prompt
+        prompt = template_env.get_template('emails/message_summary_prompt.txt').render(
+            message=self,
+            instructions='Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.',
         )
+        result = run_llamafile_completion(
+            prompt=prompt,
+            model=MessageSummary
+        )
+
         self.summary = result.summary
