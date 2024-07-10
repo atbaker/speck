@@ -45,7 +45,7 @@ class LLMServiceManager:
             '9999',
             '--no-mmap', # Gemma 2 has weird behavior when using mmap :shrug:
             '--ctx-size',
-            '4096', # 4k context window for Gemma 2
+            '8192', # 8k context window for Gemma 2
             '--model',
             model_path
         ]

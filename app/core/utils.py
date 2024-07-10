@@ -28,8 +28,9 @@ def evaluate_with_validation(
         "http://localhost:7726/completion",
         json={
             "prompt": prompt,
+            "cache_prompt": True,
             "grammar": grammar,
-            "stop": ["<end_of_turn>"] # Gemma 2
+            "stop": ["<end_of_turn>"], # Gemma 2
         },
         timeout=600 # 5 minutes, same as Llamafile server
     )
