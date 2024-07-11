@@ -3,7 +3,7 @@ from celery import Celery
 from celery.schedules import crontab
 import os
 from diskcache import Cache
-from jinja2 import Environment, PackageLoader, PrefixLoader, select_autoescape
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
 from pydantic_settings import BaseSettings
 from sqlmodel import Session, create_engine
@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     gcp_redirect_uri: str = 'https://atbaker.ngrok.io/receive-oauth-code'
     gcp_token_uri: str = 'https://oauth2.googleapis.com/token'
     gcp_oauth_scopes: list = [
-    'https://www.googleapis.com/auth/gmail.readonly',
-]
+        'https://www.googleapis.com/auth/gmail.modify'
+    ]
 
 settings = Settings()
 
@@ -107,13 +107,14 @@ celery_app = Celery(
         'control_folder': settings.celery_control_folder,
     },
     imports=['emails.tasks', 'core.tasks'],
+    worker_prefetch_multiplier=1,
 )
 
 # Jinja2
 template_env = Environment(
-    loader=PrefixLoader({
-        'core': PackageLoader('core', 'templates'),
-        'emails': PackageLoader('emails', 'templates'),
-    }),
+    loader=ChoiceLoader([
+        FileSystemLoader(os.path.join(BASE_DIR, 'core', 'templates')),
+        FileSystemLoader(os.path.join(BASE_DIR, 'emails', 'templates')),
+    ]),
     autoescape=select_autoescape(),
 )

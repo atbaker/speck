@@ -10,6 +10,7 @@ fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
 httpx = "*"
+jinja2 = "*"
 keyring = "*"
 pendulum = "*"
 psutil = "*" # Missing dependency for unstructured

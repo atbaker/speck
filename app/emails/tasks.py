@@ -28,18 +28,18 @@ def sync_inbox():
 
 
 @celery_app.task
-def generate_message_summary(message_id: int):
+def process_new_message(message_id: int):
     """
-    Generate a summary of a message.
+    Process a new message.
     """
     with Session(db_engine) as session:
-        message = session.exec(select(Message).where(Message.id == message_id)).one()
+        try:
+            message = session.exec(select(Message).where(Message.id == message_id)).one()
+        except NoResultFound:
+            # If we didn't find a Message, then do nothing
+            return
 
-    # If we already have a summary, then do nothing
-    if message.summary:
-        return
-
-    message.generate_summary()
+    message.analyze_and_process()
 
     with Session(db_engine) as session:
         session.add(message)

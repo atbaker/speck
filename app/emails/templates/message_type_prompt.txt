@@ -1,0 +1,22 @@
+<context>
+Here is an email:
+
+From: {{ message.from_ }}
+To: {{ message.to }}
+CC: {{ message.cc }}
+BCC: {{ message.bcc }}
+Subject: {{ message.subject }}
+Received: {{ message.received_at }}
+
+Message contents:
+
+{{ message.body }}
+</context>
+
+<instructions>
+{{ instructions }}
+
+{% for message_type, description in message_type_descriptions.items() %}
+"{{ message_type.value }}": {{ description }}
+{% endfor %}
+</instructions>

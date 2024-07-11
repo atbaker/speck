@@ -30,7 +30,8 @@ def evaluate_with_validation(
             "prompt": prompt,
             "cache_prompt": True,
             "grammar": grammar,
-            "stop": ["<end_of_turn>"], # Gemma 2
+            "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
+            # "stop": ["<|endoftext|>"], # Phi 3
         },
         timeout=600 # 5 minutes, same as Llamafile server
     )
@@ -59,7 +60,7 @@ def run_llamafile_completion(
     Uses LlamaFile to run a completion for a given model and message.
     """
     # Render a template with the model schema
-    template = template_env.get_template('core/_prompt_schema.txt')
+    template = template_env.get_template('_prompt_schema.txt')
     schema_example = template.render(schema=model.model_json_schema())
 
     # Take the prompt and extend it with an example of the model schema

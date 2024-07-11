@@ -1,0 +1,31 @@
+<context>
+Here is an email:
+
+From: {{ message.from_ }}
+To: {{ message.to }}
+CC: {{ message.cc }}
+BCC: {{ message.bcc }}
+Subject: {{ message.subject }}
+Received: {{ message.received_at }}
+
+Message contents:
+
+{{ message.body }}
+</context>
+
+<instructions>
+{{ instructions }}
+
+necessity values:
+{% for necessity_value, description in action_necessity_descriptions.items() %}
+"{{ necessity_value.value }}": {{ description }}
+{% endfor %}
+
+urgency values:
+{% for urgency_value, description in action_urgency_descriptions.items() %}
+"{{ urgency_value.value }}": {{ description }}
+{% endfor %}
+
+Example action entry:
+{ "action": "your-task-description-goes-here", "necessity": "Required",  "urgency": "High" }
+</instructions>
