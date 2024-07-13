@@ -5,9 +5,7 @@ speck_analysis = Analysis(
     ['app/main.py'],
     pathex=['./app'],
     binaries=[('./app/llamafile', '.')],
-    datas=[
-        ('/Users/atbaker/.local/share/virtualenvs/speck-app-R_NTEOYm/lib/python3.12/site-packages/unstructured/nlp/english-words.txt', 'unstructured/nlp')
-    ],
+    datas=[],
     hiddenimports=['config', 'emails.tasks', 'core.tasks'],
     hookspath=['./app/hooks'],
     hooksconfig={},
