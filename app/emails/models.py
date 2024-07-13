@@ -2,13 +2,13 @@ import base64
 from datetime import datetime
 import enum
 import email
+import html2text
 import pendulum
 from pydantic import BaseModel, Field
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlmodel import Column, Enum, Field, Session, SQLModel, Relationship, select, delete
 from typing import List
-from unstructured.partition.html import partition_html
 
 from config import db_engine, template_env
 from core.utils import run_llamafile_completion
@@ -105,12 +105,13 @@ class Mailbox(SQLModel, table=True):
                 message.subject = email_message['Subject']
                 message.received_at = received_at
 
-                # Use Unstructured to pre-process the body
+                # Use html2text to process the body
+                text_maker = html2text.HTML2Text()
+                text_maker.ignore_images = True
+                text_maker.ignore_links = True
+
                 content = email_message.get_body(preferencelist=('html', 'text')).get_content()
-                body_elements = partition_html(
-                    text=content,
-                )
-                message.body = '\n\n'.join([element.text for element in body_elements])
+                message.body = text_maker.handle(content)
 
                 session.add(message)
 

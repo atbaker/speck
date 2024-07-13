@@ -80,7 +80,7 @@ os.makedirs(settings.log_dir, exist_ok=True)
 os.makedirs(settings.celery_broker_dir, exist_ok=True)
 
 # SQLModel
-db_engine = create_engine(settings.database_url, echo=True)
+db_engine = create_engine(settings.database_url)
 
 def get_db_session():
     with Session(db_engine) as session:

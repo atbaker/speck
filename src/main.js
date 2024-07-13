@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron/main');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron/main');
 const axios = require('axios');
 const path = require('node:path');
 const { execFile } = require('child_process');
@@ -90,89 +90,103 @@ const createWindow = () => {
   });
 };
 
-app.on('second-instance', (event, commandLine, workingDirectory) => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
-});
+const gotTheLock = app.requestSingleInstanceLock();
 
-app.whenReady().then(() => {
-  if (!app.requestSingleInstanceLock()) {
-    app.quit();
-    return;
-  }
-
-  ipcMain.handle('ping', () => 'pong');
-  ipcMain.handle('start-auth', async () => {
-    shell.openExternal('https://atbaker.ngrok.io/authorize');
-  });
-  ipcMain.handle('get-tokens', async () => {
-    return tokens;
-  });
-
-  log.info("User data path: ", app.getPath('userData'));
-
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    // Handle deep link URL
+    const url = commandLine.pop();
+    log.info('Received deep link URL:', url);
+    if (url.startsWith('speck://receive-oauth-code')) {
+      const parsedUrl = new URL(url);
+      const code = parsedUrl.searchParams.get('code');
+      forwardOAuthCode(code);
     }
   });
 
-  // Register custom protocol
-  app.setAsDefaultProtocolClient('speck');
+  app.whenReady().then(() => {
+    if (!app.requestSingleInstanceLock()) {
+      app.quit();
+      return;
+    }
 
-  if (app.isPackaged) {
-    serverProcess = launchProcess('server', 'server.log');
-    workerProcess = launchProcess('worker', 'worker.log');
-    schedulerProcess = launchProcess('scheduler', 'scheduler.log');
-  } else {
-    log.info('Skipping server, worker, and scheduler start in development mode');
-  }
-});
-
-app.on('before-quit', () => {
-  if (serverProcess) {
-    log.info('Killing server process...');
-    serverProcess.kill();
-  }
-  if (workerProcess) {
-    log.info('Killing worker process...');
-    workerProcess.kill();
-  }
-  if (schedulerProcess) {
-    log.info('Killing scheduler process...');
-    schedulerProcess.kill();
-  }
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-});
-
-// Function to send a Google OAuth code to the FastAPI server for processing
-async function forwardOAuthCode(code) {
-  try {
-    const response = await axios.post('http://127.0.0.1:7725/receive-oauth-code', {
-      code: code
+    ipcMain.handle('ping', () => 'pong');
+    ipcMain.handle('start-auth', async () => {
+      shell.openExternal('https://atbaker.ngrok.io/authorize');
     });
-    log.info('OAuth code processed successfully:', response.data);
-  } catch (error) {
-    log.error('Error processing OAuth code:', error);
-  }
-}
+    ipcMain.handle('get-tokens', async () => {
+      return tokens;
+    });
 
-// Handle the 'open-url' event on macOS
-app.on('open-url', (event, url) => {
-  log.info('open-url event triggered')
-  event.preventDefault();
-  const parsedUrl = new URL(url);
-  if (parsedUrl.pathname === '/receive-oauth-code') {
-    const code = parsedUrl.searchParams.get('code');
-    forwardOAuthCode(code);
+    log.info("User data path: ", app.getPath('userData'));
+
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+
+    // Register custom protocol
+    app.setAsDefaultProtocolClient('speck');
+
+    if (app.isPackaged) {
+      serverProcess = launchProcess('server', 'server.log');
+      workerProcess = launchProcess('worker', 'worker.log');
+      schedulerProcess = launchProcess('scheduler', 'scheduler.log');
+    } else {
+      log.info('Skipping server, worker, and scheduler start in development mode');
+    }
+  });
+
+  app.on('before-quit', () => {
+    if (serverProcess) {
+      log.info('Killing server process...');
+      serverProcess.kill();
+    }
+    if (workerProcess) {
+      log.info('Killing worker process...');
+      workerProcess.kill();
+    }
+    if (schedulerProcess) {
+      log.info('Killing scheduler process...');
+      schedulerProcess.kill();
+    }
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  });
+
+  // Function to send a Google OAuth code to the FastAPI server for processing
+  async function forwardOAuthCode(code) {
+    try {
+      const response = await axios.post('http://127.0.0.1:7725/receive-oauth-code', {
+        code: code
+      });
+      log.info('OAuth code processed successfully:', response.data);
+    } catch (error) {
+      log.error('Error processing OAuth code:', error);
+    }
   }
-});
+
+  // Handle the 'open-url' event on macOS
+  app.on('open-url', (event, url) => {
+    log.info('open-url event triggered')
+    event.preventDefault();
+    const parsedUrl = new URL(url);
+    if (parsedUrl.pathname === '/receive-oauth-code') {
+      const code = parsedUrl.searchParams.get('code');
+      forwardOAuthCode(code);
+    }
+  });
+}

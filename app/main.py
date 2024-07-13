@@ -2,10 +2,6 @@ import os
 import sys
 
 
-# Annoyingly, disable the unstructured library's analytics
-# See: https://github.com/Unstructured-IO/unstructured?tab=readme-ov-file#chart_with_upwards_trend-analytics
-os.environ['SCARF_NO_ANALYTICS'] = 'true'
-
 def run_server():
     import uvicorn
     from server import app

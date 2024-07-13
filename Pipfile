@@ -9,16 +9,15 @@ diskcache = "*"
 fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
+html2text = "*"
 httpx = "*"
 jinja2 = "*"
 keyring = "*"
 pendulum = "*"
-psutil = "*" # Missing dependency for unstructured
 pydantic = "*"
 pydantic-settings = "*"
 sqlmodel = "*"
 tqdm = "*"
-unstructured = "*"
 uvicorn = "*"
 
 [dev-packages]
