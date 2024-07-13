@@ -261,8 +261,8 @@ class Message(SQLModel, table=True):
     def analyze_and_process(self):
         """Analyze a new message and process it."""
         self.set_type()
-        self.analyze_actions_and_urgency()
         self.generate_summary()
+        self.analyze_actions_and_urgency()
 
     def set_type(self):
         """Categorize the message based on its contents."""
@@ -310,6 +310,12 @@ class Message(SQLModel, table=True):
         Analyze the message, determine if any actions are required, and
         determine the urgency of any actions identified.
         """
+        # TODO: Disabling for now
+        self.action_necessary = ActionNecessity.NONE
+        self.action_urgency = None
+        self.actions = []
+        return
+
         # If we already have an action_necessary value, do nothing
         if self.action_necessary is not None:
             return

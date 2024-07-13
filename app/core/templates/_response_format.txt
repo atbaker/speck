@@ -1,0 +1,5 @@
+<response-format>
+Respond with a JSON object that conforms to this structure:
+
+{{ model_docs }}
+</response-format>

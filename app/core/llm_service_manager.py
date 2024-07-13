@@ -31,7 +31,7 @@ class LLMServiceManager:
     def start_llamafile_process(self):
         # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
         model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
-        # model_path = os.path.join(settings.models_dir, 'Phi-3-mini-4k-instruct-fp16.gguf')
+        # model_path = os.path.join(settings.models_dir, 'Phi-3-mini-4k-instruct-q4.gguf')
 
         self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
         self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')

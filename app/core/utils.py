@@ -1,3 +1,4 @@
+import json
 import os
 from pydantic import BaseModel, ValidationError
 import httpx
@@ -7,6 +8,7 @@ from tqdm import tqdm
 from config import template_env
 
 from .llm_service_manager import use_inference_service
+from .pydantic_models_to_gbnf_grammar import generate_gbnf_grammar_and_documentation
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 @use_inference_service
 def evaluate_with_validation(
     prompt: str,
+    grammar: str,
     model: BaseModel,
     max_retries: int = 3
 ) -> BaseModel:
@@ -21,32 +24,47 @@ def evaluate_with_validation(
     Makes a request to the Llamafile server and tries up to three times to get
     a valid response.
     """
-    # GBNF grammar for JSON (see https://github.com/ggerganov/llama.cpp/tree/b52b29ab9d601bb298050bcd2261169bc917ba2c/grammars)
-    grammar = "root   ::= object\nvalue  ::= object | array | string | number | (\"true\" | \"false\" | \"null\") ws\n\nobject ::=\n  \"{\" ws (\n            string \":\" ws value\n    (\",\" ws string \":\" ws value)*\n  )? \"}\" ws\n\narray  ::=\n  \"[\" ws (\n            value\n    (\",\" ws value)*\n  )? \"]\" ws\n\nstring ::=\n  \"\\\"\" (\n    [^\"\\\\] |\n    \"\\\\\" ([\"\\\\/bfnrt] | \"u\" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes\n  )* \"\\\"\" ws\n\nnumber ::= (\"-\"? ([0-9] | [1-9] [0-9]*)) (\".\" [0-9]+)? ([eE] [-+]? [0-9]+)? ws\n\n# Optional space: by convention, applied in this grammar after literal chars when allowed\nws ::= ([ \\t\\n] ws)?"
+    data = {
+        "prompt": prompt,
+        "cache_prompt": True,
+        "grammar": grammar,
+        "stream": True,
+        "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
+        # "stop": ["<|endoftext|>"], # Phi 3
+    }
 
-    response = httpx.post(
-        "http://localhost:7726/completion",
-        json={
-            "prompt": prompt,
-            "cache_prompt": True,
-            "grammar": grammar,
-            "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
-            # "stop": ["<|endoftext|>"], # Phi 3
-        },
-        timeout=600 # 5 minutes, same as Llamafile server
-    )
+    # Stream the response, so we can abort and retry quickly if the LLM gets stuck
+    content = ''
+    with httpx.stream('POST', "http://localhost:7726/completion", json=data, timeout=180) as response:
+        for text in response.iter_text():
+            try:
+                data = json.loads(
+                    text.strip('data :') # Strip out "data :" prefix
+                )
+                content += data['content']
+                print(content)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to decode JSON: {text}")
+                raise
 
-    # Parse the content
     try:
-        # Get the content from the response and validate it
-        content = response.json()['content']
+        # Validate the response
         result = model.model_validate_json(content)
     except ValidationError as e:
+        # If we've exhausted all our retries, just re-raise the exception
+        if max_retries <= 0:
+            raise
+
         # If we hit validation errors, append the invalid output and error
         # message(s) to the prompt and try again
         logger.error(f"LLM response was invalid: {content} {e}")
         prompt += f"\n\nYour output was invalid. Here is what you provided: {content}\n\nHere is the error message: {e}\n\nTry again to create a valid {model.__name__} object."
-        return evaluate_with_validation(prompt, model, max_retries - 1)
+        return evaluate_with_validation(
+            prompt,
+            grammar,
+            model,
+            max_retries - 1
+        )
 
     return result
 
@@ -59,18 +77,29 @@ def run_llamafile_completion(
     """
     Uses LlamaFile to run a completion for a given model and message.
     """
+    # Generate the GBNF grammar and documentation
+    grammar, documentation = generate_gbnf_grammar_and_documentation(
+        pydantic_model_list=[model]
+    )
+
     # Render a template with the model schema
-    template = template_env.get_template('_prompt_schema.txt')
-    schema_example = template.render(schema=model.model_json_schema())
+    template = template_env.get_template('_response_format.txt')
+    response_format = template.render(
+        model_docs=documentation,
+    )
 
     # Take the prompt and extend it with an example of the model schema
     prompt_with_schema = f"""
     {prompt}\n\n
-    {schema_example}
+    {response_format}
     """
 
     # Make the request to the Llamafile server
-    result = evaluate_with_validation(prompt_with_schema, model)
+    result = evaluate_with_validation(
+        prompt_with_schema,
+        grammar,
+        model
+    )
 
     # Return the content
     return result
