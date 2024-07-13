@@ -42,7 +42,7 @@ def evaluate_with_validation(
                     text.strip('data :') # Strip out "data :" prefix
                 )
                 content += data['content']
-                print(content)
+                logger.debug(f"LLM partial response: {content}")
             except json.JSONDecodeError:
                 logger.error(f"Failed to decode JSON: {text}")
                 raise

@@ -67,8 +67,15 @@ const launchProcess = (processType, logFileName) => {
   return processInstance;
 };
 
+let mainWindow;
+
 const createWindow = () => {
-  const win = new BrowserWindow({
+  if (mainWindow) {
+    mainWindow.focus();
+    return;
+  }
+
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -76,10 +83,26 @@ const createWindow = () => {
     },
   });
 
-  win.loadFile('src/index.html');
+  mainWindow.loadFile('src/index.html');
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 };
 
+app.on('second-instance', (event, commandLine, workingDirectory) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(() => {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
+
   ipcMain.handle('ping', () => 'pong');
   ipcMain.handle('start-auth', async () => {
     shell.openExternal('https://atbaker.ngrok.io/authorize');
