@@ -2,12 +2,11 @@ import pendulum
 from sqlalchemy.exc import NoResultFound
 from sqlmodel import Session, select
 
-from config import celery_app, db_engine
+from config import db_engine
 
 from .models import Mailbox, Message
 
 
-@celery_app.task
 def sync_inbox():
     """
     Sync the local Mailbox with the user's Gmail inbox.
@@ -27,7 +26,6 @@ def sync_inbox():
     mailbox.sync_inbox()
 
 
-@celery_app.task
 def process_new_message(message_id: int):
     """
     Process a new message.

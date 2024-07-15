@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 class LLMServiceManager:
     def __init__(self):
-        self.lock = threading.Lock()
-
         self.stdout_log = None
         self.stderr_log = None
 
@@ -84,59 +82,60 @@ class LLMServiceManager:
             return None
 
     def start_server(self):
-        with self.lock:
-            state = self._read_state()
-            if not state["pid"] or not self._is_process_running(state["pid"]):
-                process = self.start_llamafile_process()
-                if process:
-                    state["pid"] = process.pid
-                    state["usage_count"] = 1
-                    self._write_state(state)
-                    return process.pid
-                else:
-                    return None  # Return early if the server couldn't be started
+        state = self._read_state()
+        if not state["pid"] or not self._is_process_running(state["pid"]):
+            process = self.start_llamafile_process()
+            if process:
+                state["pid"] = process.pid
+                state["usage_count"] = 1
+                self._write_state(state)
+                return process.pid
+            else:
+                return None  # Return early if the server couldn't be started
 
-            state["usage_count"] += 1
-            self._write_state(state)
-            return state["pid"]
+        state["usage_count"] += 1
+        self._write_state(state)
+        return state["pid"]
 
     def stop_server(self):
         """Stop the server if it's not being used."""
-        with self.lock:
-            state = self._read_state()
-            state["usage_count"] -= 1
-            if state["usage_count"] <= 0 and state["pid"]:
-                try:
-                    os.kill(state["pid"], 15)  # Terminate the process
-                    state["pid"] = None
-                    state["usage_count"] = 0
-                    logger.info("Llamafile server stopped.")
-                except ProcessLookupError:
-                    logger.error("Tried to stop Llamafile server but process not found.")
+        state = self._read_state()
+        state["usage_count"] -= 1
+        if state["usage_count"] <= 0 and state["pid"]:
+            try:
+                os.kill(state["pid"], 15)  # Terminate the process
+                state["pid"] = None
+                state["usage_count"] = 0
+                logger.info("Llamafile server stopped.")
+            except ProcessLookupError:
+                logger.error("Tried to stop Llamafile server but process not found.")
 
-            self.stdout_log.close()
-            self.stderr_log.close()
-            self._write_state(state)
+        self.stdout_log.close()
+        self.stderr_log.close()
+        self._write_state(state)
 
     def force_stop_server(self):
         """Forcefully stop the server."""
-        with self.lock:
-            state = self._read_state()
-            if state["pid"]:
-                try:
-                    os.kill(state["pid"], 15)  # Attempt to terminate the process gracefully
-                    time.sleep(5)  # Wait for a few seconds to allow graceful termination
-                    if self._is_process_running(state["pid"]):
-                        os.kill(state["pid"], 9)  # Forcefully kill the process if still running
-                    state["pid"] = None
-                    state["usage_count"] = 0
-                    logger.info("Llamafile server forcefully stopped.")
-                except ProcessLookupError:
-                    logger.error("Tried to force stop Llamafile server but process not found.")
+        state = self._read_state()
+        if state["pid"]:
+            try:
+                os.kill(state["pid"], 15)  # Attempt to terminate the process gracefully
+                time.sleep(5)  # Wait for a few seconds to allow graceful termination
+                if self._is_process_running(state["pid"]):
+                    os.kill(state["pid"], 9)  # Forcefully kill the process if still running
+                state["pid"] = None
+                state["usage_count"] = 0
+                logger.info("Llamafile server forcefully stopped.")
+            except ProcessLookupError:
+                logger.error("Tried to force stop Llamafile server but process not found.")
 
+        try:
             self.stdout_log.close()
             self.stderr_log.close()
-            self._write_state(state)
+        except AttributeError:
+            pass
+
+        self._write_state(state)
 
     def _is_process_running(self, pid):
         try:

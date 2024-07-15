@@ -1,37 +1,59 @@
-import os
-import sys
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from sqlmodel import SQLModel
+
+from emails import models
+from emails import routes as email_routes
+from config import db_engine, task_manager
+from core import routes as core_routes
+from core.llm_service_manager import llm_service_manager
+from core.tasks import set_up_llm_service
+from emails.tasks import sync_inbox
 
 
-def run_server():
-    import uvicorn
-    from server import app
-    uvicorn.run(app, host="127.0.0.1", port=7725)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for the app."""
+    # Create the database tables
+    SQLModel.metadata.create_all(db_engine)
 
-def run_worker():
-    # https://stackoverflow.com/questions/67023208/run-celery-worker-with-a-compiled-python-module-compiled-using-pyinstaller
-    from config import celery_app
-    celery_app.worker_main(
-        argv=['worker', '--loglevel=info', '--pool=threads', '--concurrency=1']
+    # Start the background task manager
+    task_manager.start(num_workers=1)
+
+    # Add a recurring task to sync the inbox every minute
+    task_manager.add_recurring_task(
+        interval=60,
+        priority=2,
+        task=sync_inbox
     )
 
-def run_scheduler():
-    from config import celery_app
-    celery_app.Beat(loglevel='info').run()
+    # Schedule a task to set up the LLM server
+    task_manager.add_task(
+        priority=1,
+        task=set_up_llm_service
+    )
+
+    # Allow FastAPI to start up
+    yield
+
+    # Force stop the LLM service before shutdown
+    llm_service_manager.force_stop_server()
+
+    # Stop the background task manager
+    task_manager.stop()
+
+
+app = FastAPI(lifespan=lifespan)
+
+app.include_router(email_routes.router)
+app.include_router(core_routes.router)
+
+
+@app.get("/")
+async def hello_world():
+    return {"output": "Hello, world!"}
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: speck [server|worker|scheduler]")
-        sys.exit(1)
-
-    command = sys.argv[1]
-
-    if command == "server":
-        run_server()
-    elif command == "worker":
-        run_worker()
-    elif command == "scheduler":
-        run_scheduler()
-    else:
-        print(f"Unknown command: {command}")
-        print("Usage: main.py [server|worker|scheduler]")
-        sys.exit(1)
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=7725)

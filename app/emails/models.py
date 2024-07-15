@@ -10,7 +10,7 @@ from sqlalchemy.exc import NoResultFound
 from sqlmodel import Column, Enum, Field, Session, SQLModel, Relationship, select, delete
 from typing import List
 
-from config import db_engine, template_env
+from config import db_engine, task_manager, template_env
 from core.utils import run_llamafile_completion
 
 from .utils import get_gmail_api_client
@@ -62,7 +62,11 @@ class Mailbox(SQLModel, table=True):
                     # we need to process it
                     if not message.processed:
                         from .tasks import process_new_message
-                        process_new_message.delay(message.id)
+                        task_manager.add_task(
+                            priority=3,
+                            task=process_new_message,
+                            message_id=message_id
+                        )
 
                     continue
                 except NoResultFound:
@@ -125,7 +129,11 @@ class Mailbox(SQLModel, table=True):
             # Generate summaries for new messages
             for message_id in new_message_ids:
                 from .tasks import process_new_message
-                process_new_message.delay(message_id)
+                task_manager.add_task(
+                    priority=3,
+                    task=process_new_message,
+                    message_id=message_id
+                )
 
             session.commit()
 

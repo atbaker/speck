@@ -1,11 +1,13 @@
 import os
+import logging
 
-from config import celery_app, settings
+from config import settings
 
 from .utils import download_file
 
+logger = logging.getLogger(__name__)
 
-@celery_app.task
+
 def set_up_llm_service():
     """
     A task run on startup to prepare the LLM service.
@@ -18,4 +20,4 @@ def set_up_llm_service():
     output_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
     download_file(url, output_path)
 
-    print('LLM service setup complete')
+    logger.info('LLM service setup complete')

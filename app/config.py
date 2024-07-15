@@ -1,20 +1,20 @@
 import argparse
-from celery import Celery
-from celery.schedules import crontab
 import os
-from diskcache import Cache
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
 from pydantic_settings import BaseSettings
 from sqlmodel import Session, create_engine
 import sys
+import threading
 
 
 # Determine our base directory based on whether we're packaged in PyInstaller or not
 if hasattr(sys, '_MEIPASS'):
+    PACKAGED: bool = True
     BASE_DIR: str = sys._MEIPASS
     APP_NAME: str = 'Speck'
 else:
+    PACKAGED: bool = False
     BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
     APP_NAME: str = 'Speck (dev)'
 
@@ -35,6 +35,7 @@ args, unknown = parser.parse_known_args()
 class Settings(BaseSettings):
     app_name: str = APP_NAME
     os_name: str = platform.system()
+    packaged: bool = PACKAGED
 
     app_data_dir: str = args.user_data_dir
     speck_data_dir: str = os.path.join(app_data_dir, 'data')
@@ -45,15 +46,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
 
-    # Cache
-    cache_dir: str = os.path.join(speck_data_dir, 'cache')
-
-    # Celery
-    celery_dir: str = os.path.join(speck_data_dir, 'worker')
-    celery_backend_url: str = f'db+sqlite:///{os.path.join(celery_dir, "worker.db")}'
-    celery_broker_dir: str = os.path.join(celery_dir, 'broker')
-    celery_control_folder: str = os.path.join(celery_dir, 'control')
-    celery_beat_schedule_filename: str = os.path.join(celery_dir, 'scheduler')
+    # Task manager
+    task_manager_log_file: str = os.path.join(log_dir, 'worker.log')
 
     # LLM server
     models_dir: str = os.path.join(speck_data_dir, 'models')
@@ -75,9 +69,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Make sure the log and celery directories exist
+# Make sure the log directory exists
 os.makedirs(settings.log_dir, exist_ok=True)
-os.makedirs(settings.celery_broker_dir, exist_ok=True)
 
 # SQLModel
 db_engine = create_engine(settings.database_url)
@@ -86,28 +79,30 @@ def get_db_session():
     with Session(db_engine) as session:
         yield session
 
-# DiskCache
-cache = Cache(directory=settings.cache_dir)
+# Simple in-memory cache with thread locks
+class InMemoryCache:
+    def __init__(self):
+        self.cache = {}
+        self.lock = threading.Lock()
 
-# Celery
-celery_app = Celery(
-    'app',
-    backend=settings.celery_backend_url,
-    beat_schedule={
-        'sync-inbox-every-minute': {
-            'task': 'emails.tasks.sync_inbox',
-            'schedule': crontab(minute='*/1'),
-        },
-    },
-    beat_schedule_filename=settings.celery_beat_schedule_filename,
-    broker_url='filesystem://',
-    broker_transport_options={
-        'data_folder_in': settings.celery_broker_dir,
-        'data_folder_out': settings.celery_broker_dir,
-        'control_folder': settings.celery_control_folder,
-    },
-    imports=['emails.tasks', 'core.tasks'],
-    worker_prefetch_multiplier=1,
+    def get(self, key):
+        with self.lock:
+            return self.cache.get(key)
+
+    def set(self, key, value):
+        with self.lock:
+            self.cache[key] = value
+
+    def delete(self, key):
+        with self.lock:
+            del self.cache[key]
+
+cache = InMemoryCache()
+
+# Background task manager
+from core.priority_task_manager import PriorityTaskManager
+task_manager = PriorityTaskManager(
+    log_file=settings.task_manager_log_file if settings.packaged else None
 )
 
 # Jinja2

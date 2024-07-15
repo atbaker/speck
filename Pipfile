@@ -4,8 +4,6 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-celery = "*"
-diskcache = "*"
 fastapi = "*"
 google-api-python-client = "*"
 google-auth = "*"
@@ -17,7 +15,6 @@ pendulum = "*"
 pydantic = "*"
 pydantic-settings = "*"
 sqlmodel = "*"
-tqdm = "*"
 uvicorn = "*"
 
 [dev-packages]
