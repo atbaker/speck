@@ -63,7 +63,6 @@ class Mailbox(SQLModel, table=True):
                     if not message.processed:
                         from .tasks import process_new_message
                         task_manager.add_task(
-                            priority=3,
                             task=process_new_message,
                             message_id=message_id
                         )
@@ -130,7 +129,6 @@ class Mailbox(SQLModel, table=True):
             for message_id in new_message_ids:
                 from .tasks import process_new_message
                 task_manager.add_task(
-                    priority=3,
                     task=process_new_message,
                     message_id=message_id
                 )

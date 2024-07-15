@@ -69,7 +69,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Make sure the log directory exists
+# Make sure the data and log directories exist
+os.makedirs(settings.speck_data_dir, exist_ok=True)
 os.makedirs(settings.log_dir, exist_ok=True)
 
 # SQLModel
@@ -100,8 +101,8 @@ class InMemoryCache:
 cache = InMemoryCache()
 
 # Background task manager
-from core.priority_task_manager import PriorityTaskManager
-task_manager = PriorityTaskManager(
+from core.task_manager import TaskManager
+task_manager = TaskManager(
     log_file=settings.task_manager_log_file if settings.packaged else None
 )
 

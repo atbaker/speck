@@ -132,8 +132,8 @@ class LLMServiceManager:
         try:
             self.stdout_log.close()
             self.stderr_log.close()
-        except AttributeError:
-            pass
+        except AttributeError as e:
+            logger.error(f"Error closing log files: {e}")
 
         self._write_state(state)
 

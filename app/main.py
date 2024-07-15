@@ -20,16 +20,8 @@ async def lifespan(app: FastAPI):
     # Start the background task manager
     task_manager.start(num_workers=1)
 
-    # Add a recurring task to sync the inbox every minute
-    task_manager.add_recurring_task(
-        interval=60,
-        priority=2,
-        task=sync_inbox
-    )
-
     # Schedule a task to set up the LLM server
     task_manager.add_task(
-        priority=1,
         task=set_up_llm_service
     )
 
@@ -55,5 +47,10 @@ async def hello_world():
 
 
 if __name__ == "__main__":
+    # Necessary for PyInstaller
+    # https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html#multi-processing
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=7725)
