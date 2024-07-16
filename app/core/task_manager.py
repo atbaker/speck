@@ -6,6 +6,8 @@ from queue import Empty
 from typing import Callable, Any, Optional
 from logging.handlers import QueueHandler, QueueListener
 
+from config import settings
+
 
 # Function to configure worker logging
 def configure_worker_logging(log_queue):
@@ -83,3 +85,7 @@ class TaskManager:
         for worker in self.workers:
             worker.join()
         self.queue_listener.stop()
+
+task_manager = TaskManager(
+    log_file=settings.task_manager_log_file if settings.packaged else None
+)

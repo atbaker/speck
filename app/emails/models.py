@@ -10,8 +10,9 @@ from sqlalchemy.exc import NoResultFound
 from sqlmodel import Column, Enum, Field, Session, SQLModel, Relationship, select, delete
 from typing import List
 
-from config import db_engine, task_manager, template_env
+from config import db_engine, template_env
 from core.utils import run_llamafile_completion
+from core.task_manager import task_manager
 
 from .utils import get_gmail_api_client
 

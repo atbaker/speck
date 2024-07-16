@@ -84,9 +84,6 @@ class InMemoryCache:
 
 cache = InMemoryCache()
 
-# Background task manager (set during startup)
-task_manager = None
-
 # Jinja2
 template_env = Environment(
     loader=ChoiceLoader([

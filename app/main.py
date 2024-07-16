@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
     llm_service_manager.force_stop_server()
 
     # Stop the background task manager
+    from core.task_manager import task_manager
     task_manager.stop()
 
 
@@ -45,13 +46,8 @@ if __name__ == "__main__":
     SQLModel.metadata.create_all(db_engine)
 
     # Start the background task manager
-    from config import settings, task_manager as settings_task_manager
-    from core.task_manager import TaskManager
-    task_manager = TaskManager(
-        log_file=settings.task_manager_log_file if settings.packaged else None
-    )
+    from core.task_manager import task_manager
     task_manager.start(num_workers=1)
-    settings_task_manager = task_manager
 
     # Schedule a task to set up the LLM server
     task_manager.add_task(
