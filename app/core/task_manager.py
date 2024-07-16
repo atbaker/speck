@@ -16,9 +16,15 @@ def configure_worker_logging(log_queue):
         logger.addHandler(queue_handler)
 
 # Worker function
-def worker(task_queue, stop_event, log_queue):
+def worker(task_queue, stop_event, log_queue, main_settings):
     configure_worker_logging(log_queue)
     logger = logging.getLogger(f'worker-{multiprocessing.current_process().name}')
+
+    # Use the settings from the main process
+    from config import Settings, settings
+    settings = Settings.model_validate(main_settings)
+    logger.info(f"Worker started with models_dir: {settings.models_dir}")
+
     while not stop_event.is_set():
         try:
             task, args, kwargs = task_queue.get(timeout=1)
@@ -64,9 +70,13 @@ class TaskManager:
         self.task_queue.put((task, args, kwargs))
 
     def start(self, num_workers: int = 4):
+        # Copy our settings before starting the workers
+        from config import settings
+        main_settings = settings.model_dump()
+
         self.logger.info(f"Starting {num_workers} workers")
         for _ in range(num_workers):
-            process = multiprocessing.Process(target=worker, args=(self.task_queue, self._stop_event, self.log_queue))
+            process = multiprocessing.Process(target=worker, args=(self.task_queue, self._stop_event, self.log_queue, main_settings))
             process.start()
             self.workers.append(process)
 

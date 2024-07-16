@@ -5,6 +5,8 @@ import threading
 import time
 import requests
 from functools import wraps
+import platform
+import psutil
 
 from config import cache, settings
 
@@ -103,7 +105,11 @@ class LLMServiceManager:
         state["usage_count"] -= 1
         if state["usage_count"] <= 0 and state["pid"]:
             try:
-                os.kill(state["pid"], 15)  # Terminate the process
+                if platform.system() == "Windows":
+                    self._terminate_process_windows(state["pid"])
+                else:
+                    os.kill(state["pid"], 15)  # Terminate the process
+
                 state["pid"] = None
                 state["usage_count"] = 0
                 logger.info("Llamafile server stopped.")
@@ -119,10 +125,14 @@ class LLMServiceManager:
         state = self._read_state()
         if state["pid"]:
             try:
-                os.kill(state["pid"], 15)  # Attempt to terminate the process gracefully
-                time.sleep(5)  # Wait for a few seconds to allow graceful termination
-                if self._is_process_running(state["pid"]):
-                    os.kill(state["pid"], 9)  # Forcefully kill the process if still running
+                if platform.system() == "Windows":
+                    self._terminate_process_windows(state["pid"])
+                else:
+                    os.kill(state["pid"], 15)  # Attempt to terminate the process gracefully
+                    time.sleep(5)  # Wait for a few seconds to allow graceful termination
+                    if self._is_process_running(state["pid"]):
+                        os.kill(state["pid"], 9)  # Forcefully kill the process if still running
+
                 state["pid"] = None
                 state["usage_count"] = 0
                 logger.info("Llamafile server forcefully stopped.")
@@ -137,12 +147,27 @@ class LLMServiceManager:
 
         self._write_state(state)
 
-    def _is_process_running(self, pid):
+    def _terminate_process_windows(self, pid):
         try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
+            process = psutil.Process(pid)
+            process.terminate()
+            process.wait(5)  # Wait for the process to terminate
+        except Exception as e:
+            logger.error(f"Error terminating process on Windows: {e}")
+
+    def _is_process_running(self, pid):
+        if platform.system() == "Windows":
+            try:
+                process = psutil.Process(pid)
+                return process.is_running()
+            except Exception:
+                return False
+        else:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
 
 llm_service_manager = LLMServiceManager()
 
