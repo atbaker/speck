@@ -1,4 +1,3 @@
-import argparse
 import os
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
@@ -12,32 +11,17 @@ import threading
 if hasattr(sys, '_MEIPASS'):
     PACKAGED: bool = True
     BASE_DIR: str = sys._MEIPASS
-    APP_NAME: str = 'Speck'
 else:
     PACKAGED: bool = False
     BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
-    APP_NAME: str = 'Speck (dev)'
-
-# Parse command-line arguments, ignoring unknown ones
-parser = argparse.ArgumentParser(
-    prog='Speck',
-    description='Start the Speck client'
-)
-parser.add_argument(
-    '--user-data-dir',
-    type=str,
-    default=BASE_DIR, # Use a local directory during dev
-    help='The user data directory path.',
-)
-args, unknown = parser.parse_known_args()
 
 
 class Settings(BaseSettings):
-    app_name: str = APP_NAME
+    app_name: str = 'Speck' if PACKAGED else 'Speck (dev)'
     os_name: str = platform.system()
     packaged: bool = PACKAGED
 
-    app_data_dir: str = args.user_data_dir
+    app_data_dir: str = os.environ.get('APP_DATA_DIR', BASE_DIR)
     speck_data_dir: str = os.path.join(app_data_dir, 'data')
 
     # Logging
@@ -100,11 +84,8 @@ class InMemoryCache:
 
 cache = InMemoryCache()
 
-# Background task manager
-from core.task_manager import TaskManager
-task_manager = TaskManager(
-    log_file=settings.task_manager_log_file if settings.packaged else None
-)
+# Background task manager (set during startup)
+task_manager = None
 
 # Jinja2
 template_env = Environment(

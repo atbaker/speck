@@ -30,15 +30,18 @@ const launchProcess = (logFileName) => {
     ? path.join(app.getAppPath(), '../speck', 'speck.exe')
     : path.join(app.getAppPath(), '../speck', 'speck');
 
-  const args = [`--user-data-dir=${app.getPath('userData')}`];
   const options = {
     stdio: ['ignore', 'pipe', 'pipe'],
-    execArgv: ['--title=speck'] // Set the process title
+    execArgv: ['--title=speck'], // Set the process title
+    env: {
+      ...process.env, // Inherit existing environment variables
+      APP_DATA_DIR: app.getPath('userData') // Set the custom environment variable
+    }
   };
   let processInstance;
 
   try {
-    processInstance = execFile(executablePath, args, options);
+    processInstance = execFile(executablePath, [], options);
 
     if (processInstance.pid) {
       log.info(`speck process started with PID: ${processInstance.pid}`);
