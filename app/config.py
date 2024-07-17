@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
 
     # Task manager
-    task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else None
+    task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else ''
 
     # LLM server
     models_dir: str = os.path.join(speck_data_dir, 'models')

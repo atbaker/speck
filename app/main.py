@@ -36,13 +36,20 @@ if __name__ == "__main__":
     from core.cache import initialize_cache
     initialize_cache(cache_manager_dict, cache_manager_lock)
 
+    # Define the recurring tasks
+    from emails.tasks import sync_inbox
+    recurring_tasks = [
+        (sync_inbox, 60, (), {})  # (task, interval in seconds, args, kwargs)
+    ]
+
     # Start the background task manager
     from config import settings
     from core.task_manager import initialize_task_manager
     task_manager = initialize_task_manager(
         cache_manager_dict=cache_manager_dict,
         cache_manager_lock=cache_manager_lock,
-        log_file=settings.task_manager_log_file
+        log_file=settings.task_manager_log_file,
+        recurring_tasks=recurring_tasks
     )
     task_manager.start(
         num_workers=1

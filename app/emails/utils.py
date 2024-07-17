@@ -29,7 +29,7 @@ def get_gmail_api_client():
     refresh the access token.
     """
     credentials = _get_user_credentials()
-    client = googleapiclient.discovery.build('gmail', 'v1', credentials=credentials)
+    client = googleapiclient.discovery.build('gmail', 'v1', credentials=credentials, cache_discovery=False)
 
     # Make a request to refresh the access token
     client.users().getProfile(userId='me').execute()
