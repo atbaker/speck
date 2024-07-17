@@ -1,58 +1,64 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from sqlmodel import SQLModel
-
-from emails import models
-from emails import routes as email_routes
-from core import routes as core_routes
-from core.llm_service_manager import llm_service_manager
-from core.tasks import set_up_llm_service
-from emails.tasks import sync_inbox
+import multiprocessing
+import signal
+import sys
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for the app."""
-    # Allow FastAPI to start up
-    yield
-
-    # Force stop the LLM service before shutdown
-    llm_service_manager.force_stop_server()
-
+def handle_exit(*args):
     # Stop the background task manager
     from core.task_manager import task_manager
     task_manager.stop()
 
+    # Force stop the LLM service before shutdown
+    from core.llm_service_manager import llm_service_manager
+    llm_service_manager.force_stop_server()
 
-app = FastAPI(lifespan=lifespan)
-
-app.include_router(email_routes.router)
-app.include_router(core_routes.router)
-
-
-@app.get("/")
-async def hello_world():
-    return {"output": "Hello, world!"}
+    sys.exit(0)
 
 
 if __name__ == "__main__":
-    # Necessary for PyInstaller
+    # Must be imported and set first, for PyInstaller
     # https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html#multi-processing
-    import multiprocessing
     multiprocessing.freeze_support()
+    multiprocessing.set_start_method('spawn')
 
     # Create the database tables
+    from sqlmodel import SQLModel
     from config import db_engine
     SQLModel.metadata.create_all(db_engine)
 
+    # Create a multiprocessing Manager to use for the cache and task manager
+    from multiprocessing import Manager
+    manager = Manager()
+    cache_manager_dict = manager.dict()
+    cache_manager_lock = manager.Lock()
+
+    # Initialize the cache
+    from core.cache import initialize_cache
+    initialize_cache(cache_manager_dict, cache_manager_lock)
+
     # Start the background task manager
-    from core.task_manager import task_manager
-    task_manager.start(num_workers=1)
+    from config import settings
+    from core.task_manager import initialize_task_manager
+    task_manager = initialize_task_manager(
+        cache_manager_dict=cache_manager_dict,
+        cache_manager_lock=cache_manager_lock,
+        log_file=settings.task_manager_log_file
+    )
+    task_manager.start(
+        num_workers=1
+    )
 
     # Schedule a task to set up the LLM server
+    from core.tasks import set_up_llm_service
     task_manager.add_task(
         task=set_up_llm_service
     )
 
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+
+    # Start the FastAPI server
+    from server import app
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=7725)

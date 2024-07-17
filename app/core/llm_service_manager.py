@@ -8,7 +8,8 @@ from functools import wraps
 import platform
 import psutil
 
-from config import cache, settings
+from config import settings
+from core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +117,12 @@ class LLMServiceManager:
             except ProcessLookupError:
                 logger.error("Tried to stop Llamafile server but process not found.")
 
-        self.stdout_log.close()
-        self.stderr_log.close()
+        try:
+            self.stdout_log.close()
+            self.stderr_log.close()
+        except AttributeError:
+            pass
+
         self._write_state(state)
 
     def force_stop_server(self):
@@ -143,7 +148,7 @@ class LLMServiceManager:
             self.stdout_log.close()
             self.stderr_log.close()
         except AttributeError as e:
-            logger.error(f"Error closing log files: {e}")
+            pass
 
         self._write_state(state)
 
@@ -181,7 +186,7 @@ def use_inference_service(func):
         try:
             result = func(*args, **kwargs)
         finally:
-            threading.Timer(30, llm_service_manager.stop_server).start()
+            threading.Timer(5, llm_service_manager.stop_server).start()
         
         return result
     

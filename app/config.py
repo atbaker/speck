@@ -4,7 +4,6 @@ import platform
 from pydantic_settings import BaseSettings
 from sqlmodel import Session, create_engine
 import sys
-import threading
 
 
 # Determine our base directory based on whether we're packaged in PyInstaller or not
@@ -31,7 +30,7 @@ class Settings(BaseSettings):
     database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
 
     # Task manager
-    task_manager_log_file: str = os.path.join(log_dir, 'worker.log')
+    task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else None
 
     # LLM server
     models_dir: str = os.path.join(speck_data_dir, 'models')
@@ -63,26 +62,6 @@ db_engine = create_engine(settings.database_url)
 def get_db_session():
     with Session(db_engine) as session:
         yield session
-
-# Simple in-memory cache with thread locks
-class InMemoryCache:
-    def __init__(self):
-        self.cache = {}
-        self.lock = threading.Lock()
-
-    def get(self, key):
-        with self.lock:
-            return self.cache.get(key)
-
-    def set(self, key, value):
-        with self.lock:
-            self.cache[key] = value
-
-    def delete(self, key):
-        with self.lock:
-            del self.cache[key]
-
-cache = InMemoryCache()
 
 # Jinja2
 template_env = Environment(

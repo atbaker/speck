@@ -6,8 +6,7 @@ from queue import Empty
 from typing import Callable, Any, Optional
 from logging.handlers import QueueHandler, QueueListener
 
-from config import settings
-
+from core.cache import initialize_cache
 
 # Function to configure worker logging
 def configure_worker_logging(log_queue):
@@ -18,18 +17,19 @@ def configure_worker_logging(log_queue):
         logger.addHandler(queue_handler)
 
 # Worker function
-def worker(task_queue, stop_event, log_queue):
+def worker(task_queue, stop_event, log_queue, cache_manager_dict, cache_manager_lock):
     configure_worker_logging(log_queue)
     logger = logging.getLogger(f'worker-{multiprocessing.current_process().name}')
 
-    from config import settings
-    logger.info(f"Worker started with app_data_dir: {settings.app_data_dir}")
+    # Initialize the cache using our multiprocessing Manager dict and lock
+    cache = initialize_cache(cache_manager_dict, cache_manager_lock)
 
     while not stop_event.is_set():
         try:
             task, args, kwargs = task_queue.get(timeout=1)
             logger.info(f"Executing task {task.__name__}")
             try:
+                cache.set('last_task', task.__name__)
                 task(*args, **kwargs)
                 logger.info(f"Task {task.__name__} completed")
             except Exception as e:
@@ -58,12 +58,16 @@ def setup_main_logger(log_queue, log_file=None):
     return logger, queue_listener
 
 class TaskManager:
-    def __init__(self, log_file: Optional[str] = None):
+    def __init__(self, cache_manager_dict, cache_manager_lock, log_file: Optional[str] = None):
         self.task_queue = multiprocessing.Queue()
         self.workers = []
         self._stop_event = multiprocessing.Event()
         self.log_queue = multiprocessing.Queue()
         self.logger, self.queue_listener = setup_main_logger(self.log_queue, log_file)
+
+        # multiprocess Manager dict and lock for workers to use initializing the cache
+        self.cache_manager_dict = cache_manager_dict
+        self.cache_manager_lock = cache_manager_lock
 
     def add_task(self, task: Callable, *args, **kwargs):
         self.logger.info(f"Adding task {task.__name__}")
@@ -74,7 +78,7 @@ class TaskManager:
         for _ in range(num_workers):
             process = multiprocessing.Process(
                 target=worker,
-                args=(self.task_queue, self._stop_event, self.log_queue),
+                args=(self.task_queue, self._stop_event, self.log_queue, self.cache_manager_dict, self.cache_manager_lock)
             )
             process.start()
             self.workers.append(process)
@@ -83,9 +87,15 @@ class TaskManager:
         self.logger.info("Stopping all workers")
         self._stop_event.set()
         for worker in self.workers:
+            worker.terminate()
             worker.join()
         self.queue_listener.stop()
 
-task_manager = TaskManager(
-    log_file=settings.task_manager_log_file if settings.packaged else None
-)
+
+task_manager = None
+
+def initialize_task_manager(cache_manager_dict, cache_manager_lock, log_file: Optional[str] = None):
+    global task_manager
+    task_manager = TaskManager(cache_manager_dict=cache_manager_dict, cache_manager_lock=cache_manager_lock, log_file=log_file)
+
+    return task_manager

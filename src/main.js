@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron/main');
 const axios = require('axios');
 const path = require('node:path');
-const { execFile } = require('child_process');
+const { execFile, exec } = require('child_process');
 const { URL } = require('url');
 const log = require('electron-log');
 
@@ -148,7 +148,17 @@ if (!gotTheLock) {
   app.on('before-quit', () => {
     if (serverProcess) {
       log.info('Killing speck process...');
-      serverProcess.kill();
+      if (process.platform === 'win32') {
+        exec(`taskkill /F /T /PID ${serverProcess.pid}`, (error, stdout, stderr) => {
+          if (error) {
+            log.error(`Failed to kill speck process: ${error.message}`);
+          } else {
+            log.info(`Speck process killed: ${stdout}`);
+          }
+        });
+      } else {
+        serverProcess.kill();
+      }
     }
   });
 
