@@ -1,5 +1,34 @@
-#speck-summary {
-    background-color: #f9f9f9;
+#speck-div {
+    margin-top: 10px;
+    margin-left: 10px;
+    margin-right: 10px;
+    padding: 15px;
+    border-radius: 10px;
+    background: linear-gradient(to right, #e6ecf9, #c1cbf3);
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    width: 100%;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+}
+
+.speck-title {
     font-size: 14px;
-  }
-  
+    margin-bottom: 5px;
+    color: #333;
+}
+
+#speck-summary {
+    font-size: 16px;
+    line-height: 1.5;
+    color: #333;
+}
+
+@media (max-width: 768px) {
+    #speck-div {
+        width: 90%;
+    }
+}

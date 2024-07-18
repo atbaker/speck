@@ -1,40 +1,60 @@
 const API_URL = 'http://127.0.0.1:7725/summary';
 
-function getEmailSummary(threadId) {
-  return fetch(`${API_URL}?threadId=${threadId}`)
-    .then(response => response.json())
-    .then(data => data.summary)
-    .catch(error => {
-      console.error('Error fetching email summary:', error);
-      return 'Error fetching summary';
-    });
+async function getEmailSummary(threadId) {
+  try {
+    const response = await fetch(`${API_URL}?threadId=${threadId}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.summary;
+  } catch (error) {
+    console.error('Error fetching email summary:', error);
+    return 'Error fetching summary';
+  }
 }
 
-function addSummaryDiv(threadId) {
-  const emailContainer = document.querySelector('div[role="main"]'); // Adjust the selector as needed
-  if (!emailContainer) return;
+function insertSpeckDiv() {
+  const emailContainer = document.querySelector('div[role="main"]');
+  if (emailContainer) {
+    const subjectElement = emailContainer.querySelector('h2');
+    const threadId = subjectElement.getAttribute('data-legacy-thread-id');
+    if (threadId) {
+      // Check if the Speck div already exists
+      if (document.getElementById('speck-div')) return;
 
-  const summaryDiv = document.createElement('div');
-  summaryDiv.id = 'speck-summary';
-  summaryDiv.style.border = '1px solid #ccc';
-  summaryDiv.style.padding = '10px';
-  summaryDiv.style.marginBottom = '10px';
+      // Create the Speck div
+      const speckDiv = document.createElement('div');
+      speckDiv.id = 'speck-div';
 
-  getEmailSummary(threadId).then(summary => {
-    summaryDiv.textContent = summary;
-  });
+      // Create the Speck title
+      const speckTitle = document.createElement('strong');
+      speckTitle.innerText = 'Speck';
+      speckTitle.className = 'speck-title';
 
-  // Insert the summary div into the page
-  const subjectElement = emailContainer.querySelector('.hP'); // Adjust the selector as needed
-  if (subjectElement) {
-    subjectElement.insertAdjacentElement('afterend', summaryDiv);
+      // Create the summary
+      const summaryText = document.createElement('div');
+      summaryText.id = 'speck-summary';
+
+      // Append the title and summary to the Speck div
+      speckDiv.appendChild(speckTitle);
+      speckDiv.appendChild(summaryText);
+
+      // Insert the Speck div into the Gmail UI
+      subjectElement.parentElement.parentElement.parentElement.insertAdjacentElement('beforebegin', speckDiv);
+
+      // Fetch the summary from the FastAPI server
+      getEmailSummary(threadId).then(summary => {
+        summaryText.innerText = summary;
+      });
+    }
   }
 }
 
 function onThreadLoad() {
-  const threadId = document.querySelector('div[role="main"] h2[data-legacy-thread-id]')
+  const threadId = document.querySelector('div[role="main"] h2[data-legacy-thread-id]');
   if (threadId) {
-    addSummaryDiv(threadId.getAttribute('data-legacy-thread-id'));
+    insertSpeckDiv();
   }
 }
 
