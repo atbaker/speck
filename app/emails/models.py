@@ -74,7 +74,6 @@ class Mailbox(SQLModel, table=True):
                         id=message_id,
                         mailbox_id=self.id,
                     )
-                    new_message_ids.append(message_id)
 
                 # Get the raw data from Gmail for this message
                 response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
@@ -114,10 +113,16 @@ class Mailbox(SQLModel, table=True):
                 text_maker.ignore_images = True
                 text_maker.ignore_links = True
 
-                content = email_message.get_body(preferencelist=('html', 'text')).get_content()
+                try:
+                    content = email_message.get_body(preferencelist=('html', 'text')).get_content()
+                except AttributeError:
+                    # TODO If the message doesn't have a body, like a calendar invitation, just ignore it for now
+                    continue
+
                 message.body = text_maker.handle(content)
 
                 session.add(message)
+                new_message_ids.append(message_id)
 
             # Update the Mailbox's last_synced_at
             self.last_synced_at = last_synced_at

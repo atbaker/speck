@@ -1,3 +1,4 @@
+import importlib
 import multiprocessing
 import threading
 import time
@@ -55,11 +56,16 @@ def scheduler(task_queue, stop_event, log_queue, recurring_tasks):
 
     while not stop_event.is_set():
         current_time = time.time()
-        for task, interval, args, kwargs in recurring_tasks:
-            if current_time >= next_run_times[task]:
+        for task_name, interval, args, kwargs in recurring_tasks:
+            if current_time >= next_run_times[task_name]:
+                # Convert the task name into a function object
+                module_name, function_name = task_name.rsplit('.', 1)
+                module = importlib.import_module(module_name)
+                task = getattr(module, function_name)
+
                 logger.info(f"Scheduling recurring task {task.__name__}")
                 task_queue.put((task, args, kwargs))
-                next_run_times[task] = current_time + interval
+                next_run_times[task_name] = current_time + interval
 
         time.sleep(1)  # Sleep for a short duration to avoid busy-waiting
 

@@ -13,7 +13,7 @@ from sqlmodel import select, Session
 
 from config import settings, get_db_session
 
-from .models import Mailbox
+from .models import Mailbox, Message
 from .utils import get_gmail_api_client
 
 logger = logging.getLogger(__name__)
@@ -101,3 +101,13 @@ async def test_sync_inbox(*, session: Session = Depends(get_db_session)):
     mailbox = session.exec(select(Mailbox)).one()
     mailbox.sync_inbox(session=session)
     return {"status": "success"}
+
+
+@router.get('/summary')
+async def get_summary(threadId: str, session: Session = Depends(get_db_session)):
+    """Retrieves the summary of a specific thread."""
+    try:
+        message = session.exec(select(Message).where(Message.thread_id == threadId)).one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"status": "success", "summary": message.summary}

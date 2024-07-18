@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from emails import models
 from emails import routes as email_routes
@@ -6,6 +7,17 @@ from core import routes as core_routes
 
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        'https://mail.google.com',
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(email_routes.router)
 app.include_router(core_routes.router)
