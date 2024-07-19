@@ -141,6 +141,22 @@ class Mailbox(SQLModel, table=True):
 
             session.commit()
 
+    def get_messages(self):
+        """Get all the messages in the mailbox."""
+        with Session(db_engine) as session:
+            messages = session.exec(
+                select(Message).where(Message.mailbox_id == self.id)
+            ).all()
+
+        mailbox_data = {}
+        for message in messages:
+            mailbox_data[message.thread_id] = {
+                'id': message.id,
+                'message_type': message.message_type,
+                'summary': message.summary,
+            }
+        return mailbox_data
+
     def insert_message(self):
         """Insert a message into the user's inbox."""
         client = get_gmail_api_client()

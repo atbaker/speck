@@ -1,27 +1,32 @@
 {
-    "manifest_version": 3,
-    "name": "Speck Gmail Extension",
-    "version": "1.0",
-    "description": "Extends Gmail UI to include email summaries from Speck",
-    "permissions": [
-      "activeTab",
-      "scripting",
-      "storage"
-    ],
-    "host_permissions": [
-      "http://127.0.0.1:7725/*"
-    ],
-    "content_scripts": [
-      {
-        "matches": ["https://mail.google.com/*"],
-        "js": ["content.js"],
-        "css": ["styles.css"]
-      }
-    ],
-    "background": {
-      "scripts": ["background.js"]
+  "manifest_version": 3,
+  "name": "Speck Gmail Extension",
+  "version": "1.0",
+  "description": "Extends Gmail UI to include email summaries from Speck",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["gmail-content.js"],
+      "css": ["styles.css"]
     },
-    "action": {
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": ["https://mail.google.com/*"],
+      "js": ["content.js"]
     }
-  }
-  
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {}
+}

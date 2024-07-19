@@ -27,6 +27,22 @@
     color: #333;
 }
 
+#start-recording {
+    margin-top: 10px;
+    padding: 10px 20px;
+    border-radius: 5px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s ease;
+}
+
+#start-recording:hover {
+    background: #45a049;
+}
+
 @media (max-width: 768px) {
     #speck-div {
         width: 90%;

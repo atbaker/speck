@@ -1,69 +1,126 @@
-const API_URL = 'http://127.0.0.1:7725/summary';
+console.log("Content script loaded");
 
-async function getEmailSummary(threadId) {
-  try {
-    const response = await fetch(`${API_URL}?threadId=${threadId}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    return data.summary;
-  } catch (error) {
-    console.error('Error fetching email summary:', error);
-    return 'Error fetching summary';
+let recording = false;
+let threadId = null;
+
+// Function to start recording
+function startRecording(id) {
+  recording = true;
+  threadId = id;
+  console.log("Recording started for thread ID:", threadId);
+
+  // Create the popover div
+  const popover = document.createElement('div');
+  popover.id = 'recording-popover';
+  popover.style.position = 'fixed';
+  popover.style.top = '10px';
+  popover.style.right = '10px';
+  popover.style.padding = '10px';
+  popover.style.backgroundColor = 'white';
+  popover.style.border = '1px solid #ccc';
+  popover.style.zIndex = '10000';
+  popover.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+
+  // Add email message ID
+  const messageId = document.createElement('p');
+  messageId.innerText = 'Email ID: ' + threadId;
+  popover.appendChild(messageId);
+
+  // Create the 'stop recording' button
+  const stopRecordingButton = document.createElement('button');
+  stopRecordingButton.innerText = 'Stop Recording';
+  stopRecordingButton.addEventListener('click', () => {
+    stopRecording();
+  });
+  popover.appendChild(stopRecordingButton);
+
+  // Append the popover to the body
+  document.body.appendChild(popover);
+
+  // Add event listeners to record user actions
+  document.addEventListener("click", recordClick);
+  document.addEventListener("input", recordInput);
+
+  // Log the initial state
+  logStateChange();
+}
+
+// Function to stop recording
+function stopRecording() {
+  recording = false;
+  console.log("Recording stopped.");
+
+  // Remove event listeners
+  document.removeEventListener("click", recordClick);
+  document.removeEventListener("input", recordInput);
+
+  // Remove the popover
+  const popover = document.getElementById('recording-popover');
+  if (popover) {
+    document.body.removeChild(popover);
+  }
+
+  // Send the stop recording message to the background script
+  chrome.runtime.sendMessage({ action: "stop_recording" });
+}
+
+// Function to record click events
+function recordClick(event) {
+  if (recording) {
+    const entry = {
+      type: "input",
+      timestamp: Date.now(),
+      x: event.clientX,
+      y: event.clientY,
+      target: event.target.outerHTML
+    };
+    chrome.runtime.sendMessage({ action: "log_action", entry: entry });
   }
 }
 
-function insertSpeckDiv() {
-  const emailContainer = document.querySelector('div[role="main"]');
-  if (emailContainer) {
-    const subjectElement = emailContainer.querySelector('h2');
-    const threadId = subjectElement.getAttribute('data-legacy-thread-id');
-    if (threadId) {
-      // Check if the Speck div already exists
-      if (document.getElementById('speck-div')) return;
-
-      // Create the Speck div
-      const speckDiv = document.createElement('div');
-      speckDiv.id = 'speck-div';
-
-      // Create the Speck title
-      const speckTitle = document.createElement('strong');
-      speckTitle.innerText = 'Speck';
-      speckTitle.className = 'speck-title';
-
-      // Create the summary
-      const summaryText = document.createElement('div');
-      summaryText.id = 'speck-summary';
-
-      // Append the title and summary to the Speck div
-      speckDiv.appendChild(speckTitle);
-      speckDiv.appendChild(summaryText);
-
-      // Insert the Speck div into the Gmail UI
-      subjectElement.parentElement.parentElement.parentElement.insertAdjacentElement('beforebegin', speckDiv);
-
-      // Fetch the summary from the FastAPI server
-      getEmailSummary(threadId).then(summary => {
-        summaryText.innerText = summary;
-      });
-    }
+// Function to record input events
+function recordInput(event) {
+  if (recording) {
+    const entry = {
+      type: "input",
+      timestamp: Date.now(),
+      target: event.target.outerHTML,
+      value: event.target.value
+    };
+    chrome.runtime.sendMessage({ action: "log_action", entry: entry });
   }
 }
 
-function onThreadLoad() {
-  const threadId = document.querySelector('div[role="main"] h2[data-legacy-thread-id]');
-  if (threadId) {
-    insertSpeckDiv();
+// Function to log state changes (e.g., URL changes)
+function logStateChange() {
+  if (recording) {
+    const entry = {
+      type: "state",
+      timestamp: Date.now(),
+      url: window.location.href
+    };
+    chrome.runtime.sendMessage({ action: "log_action", entry: entry });
   }
 }
 
-// Listen for changes to the URL to detect when an email is opened
-let lastUrl = location.href;
-new MutationObserver(() => {
-  const url = location.href;
-  if (url !== lastUrl) {
-    lastUrl = url;
-    onThreadLoad();
+// Listen for messages from the background script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("Message received in content script:", message);
+  if (message.action === "start_recording") {
+    startRecording(message.threadId);
+    sendResponse({ status: "recording_started" }); // Send a response back to the background script
   }
-}).observe(document, { subtree: true, childList: true });
+});
+
+// Check if recording is in progress when the content script loads
+chrome.runtime.sendMessage({ action: "get_recording_state" }, (response) => {
+  if (response && response.recording) {
+    startRecording(response.threadId);
+  }
+});
+
+// Listen for navigation events to log URL changes
+window.addEventListener('popstate', logStateChange);
+window.addEventListener('pushstate', logStateChange);
+window.addEventListener('replacestate', logStateChange);
+window.addEventListener('hashchange', logStateChange);

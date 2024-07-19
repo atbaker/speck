@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from emails import models
-from emails import routes as email_routes
 from core import routes as core_routes
+from emails import models as email_models
+from emails import routes as email_routes
 
 
 app = FastAPI()

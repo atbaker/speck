@@ -42,7 +42,7 @@ class LLMServiceManager:
             '--server',
             '--nobrowser',
             '--port',
-            '7726',
+            '17726',
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
             '--no-mmap', # Gemma 2 has weird behavior when using mmap :shrug:
@@ -65,7 +65,7 @@ class LLMServiceManager:
             )
 
             # Poll the /health endpoint until the server is ready
-            health_url = "http://127.0.0.1:7726/health"
+            health_url = "http://127.0.0.1:17726/health"
             for _ in range(60):  # Retry for up to 60 seconds
                 try:
                     response = requests.get(health_url)

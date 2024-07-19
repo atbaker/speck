@@ -34,7 +34,7 @@ def evaluate_with_validation(
 
     # Stream the response, so we can abort and retry quickly if the LLM gets stuck
     content = ''
-    with httpx.stream('POST', "http://localhost:7726/completion", json=data, timeout=180) as response:
+    with httpx.stream('POST', "http://localhost:17726/completion", json=data, timeout=180) as response:
         for text in response.iter_text():
             try:
                 data = json.loads(

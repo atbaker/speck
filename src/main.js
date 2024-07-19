@@ -171,7 +171,7 @@ if (!gotTheLock) {
   // Function to send a Google OAuth code to the FastAPI server for processing
   async function forwardOAuthCode(code) {
     try {
-      const response = await axios.post('http://127.0.0.1:7725/receive-oauth-code', {
+      const response = await axios.post('http://127.0.0.1:17725/receive-oauth-code', {
         code: code
       });
       log.info('OAuth code processed successfully:', response.data);
