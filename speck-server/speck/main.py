@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 import signal
 import sys
 
@@ -52,6 +53,12 @@ if __name__ == "__main__":
     )
     task_manager.start(
         num_workers=1
+    )
+
+    # Schedule a task to install the Playwright browser
+    from core.tasks import install_browser
+    task_manager.add_task(
+        task=install_browser
     )
 
     # Schedule a task to set up the LLM server

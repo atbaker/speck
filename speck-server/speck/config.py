@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Task manager
     task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else ''
 
+    # Playwright
+    playwright_browsers_dir: str = os.path.join(speck_data_dir, 'browsers')
+    os.makedirs(playwright_browsers_dir, exist_ok=True)
+    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = playwright_browsers_dir
+
     # LLM server
     models_dir: str = os.path.join(speck_data_dir, 'models')
 

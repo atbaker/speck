@@ -1,5 +1,6 @@
 import os
 import logging
+import subprocess
 
 from config import settings
 
@@ -21,3 +22,17 @@ def set_up_llm_service():
     download_file(url, output_path)
 
     logger.info('LLM service setup complete')
+
+def install_browser():
+    """
+    A task run on startup to install the Playwright browser.
+    """
+    logger.info('Installing browser')
+
+    try:
+        result = subprocess.run(['playwright', 'install', 'chromium'], check=True, capture_output=True, text=True)
+        logger.info(f'Browser installed successfully: {result.stdout}')
+    except subprocess.CalledProcessError as e:
+        logger.error(f'Failed to install browser: {e.stderr}')
+
+    logger.info('Browser installed')
