@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     os_name: str = platform.system()
     packaged: bool = PACKAGED
 
-    app_data_dir: str = os.environ.get('APP_DATA_DIR', BASE_DIR)
+    app_data_dir: str = os.environ.get('APP_DATA_DIR', os.path.dirname(BASE_DIR))
     speck_data_dir: str = os.path.join(app_data_dir, 'data')
 
     # Logging

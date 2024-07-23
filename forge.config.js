@@ -5,22 +5,17 @@ module.exports = {
   packagerConfig: {
     asar: false,
     extraResource: [
-      'dist/speck',
+      'speck-server/dist/speck',
     ],
     ignore: [
-      // Source and build code
-      'build',
-      'app',
-      'dist/speck',
+      // Python source and build code
+      'speck-server',
 
       // Miscellaneous
       '.gitignore',
       '.vscode',
       'forge.config.js',
-      'Pipfile',
-      'Pipfile.lock',
       'README.md',
-      'speck.spec',
     ],
   },
   rebuildConfig: {},

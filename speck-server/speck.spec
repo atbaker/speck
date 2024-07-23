@@ -2,12 +2,12 @@
 
 
 speck_analysis = Analysis(
-    ['app/main.py'],
-    pathex=['./app'],
-    binaries=[('./app/llamafile', '.')],
+    ['speck/main.py'],
+    pathex=['./speck'],
+    binaries=[('./speck/llamafile', '.')],
     datas=[],
     hiddenimports=[],
-    hookspath=['./app/hooks'],
+    hookspath=['./speck/hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
