@@ -4,15 +4,16 @@ import enum
 import email
 import html2text
 import pendulum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlmodel import Column, Enum, Field, Session, SQLModel, Relationship, select, delete
-from typing import List
+from typing import List, Optional
 
 from config import db_engine, template_env
 from core.utils import run_llamafile_completion
 from core.task_manager import task_manager
+from library import speck_library
 
 from .utils import get_gmail_api_client
 
@@ -256,6 +257,21 @@ MESSAGE_TYPE_DESCRIPTIONS = {
     MessageType.MISCELLANEOUS: "An email which does not fit any other category."
 }
 
+class SelectedFunctionArgument(BaseModel):
+    name: str
+    value: str
+
+class SelectedFunction(BaseModel):
+    name: str
+    arguments: Optional[List[SelectedFunctionArgument]] = None
+    reason: str
+
+    @field_validator('name')
+    def name_must_exist_in_speck_library(cls, v):
+        if v not in speck_library.functions:
+            raise ValueError(f"Function '{v}' is not in the Speck library. Do not invent new functions, only return functions that are already in the Speck library.")
+        return v
+
 class Message(SQLModel, table=True):
     id: str | None = Field(default=None, primary_key=True)
 
@@ -281,6 +297,9 @@ class Message(SQLModel, table=True):
     action_urgency: ActionUrgency | None = Field(default=None, sa_column=Column(Enum(ActionUrgency)))
     summary: str | None = None
 
+    functions_analyzed: bool = Field(default=False)
+    selected_functions: List[SelectedFunction] = Field(default_factory=list, sa_column=Column(JSON))
+
     created_at: datetime = Field(default_factory=datetime.now)
 
     @property
@@ -292,6 +311,7 @@ class Message(SQLModel, table=True):
         self.set_type()
         self.generate_summary()
         self.analyze_actions_and_urgency()
+        self.select_functions()
 
     def set_type(self):
         """Categorize the message based on its contents."""
@@ -394,3 +414,29 @@ class Message(SQLModel, table=True):
         self.action_necessary = most_necessary_action.necessity
         self.action_urgency = most_necessary_action.urgency
         self.actions = [action.model_dump_json() for action in result.actions]
+
+    def select_functions(self):
+        """
+        Analyzes this message vs. the library of available Speck functions and
+        selects the most relevant ones, if any, to surface to the user.
+        """
+        if self.functions_analyzed:
+            return
+
+        class SelectedFunctions(BaseModel):
+            no_functions_chosen: bool = Field(default=True)
+            functions: Optional[List[SelectedFunction]] = None
+
+        prompt = template_env.get_template('select_functions_prompt.txt').render(
+            message=self,
+            instructions="Speck Functions are the functions that Speck can perform on behalf of the user. Based on the contents of the email, determine which Speck functions, if any, are relevant. If a function is relevant, identify the function, the arguments it requires, and the reason for its relevance. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_chosen' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
+            speck_library=speck_library
+        )
+        result = run_llamafile_completion(
+            prompt=prompt,
+            model=SelectedFunctions
+        )
+
+        if result.functions is not None:
+            self.selected_functions = [func.model_dump_json() for func in result.functions]
+        self.functions_analyzed = True

@@ -4,13 +4,29 @@ from playwright.sync_api import sync_playwright
 # TODO: Only importing to get the Playwright environment variable set
 from config import settings
 
+from . import SpeckFunction
+
+NAME = "USPS hold mail"
+
 
 def usps_hold_mail(
-        username: str,
-        password: str,
-        start_date: datetime.date,
-        end_date: datetime.date
+        start_date: str,
+        end_date: str
 ):
+    """
+    Schedules a USPS hold mail for the user on usps.com, for a given
+    date range.
+
+    When to surface this function:
+        - When the user has upcoming travel away from home
+
+    Parameters:
+        start_date (str): The start date for the hold mail in MM/DD/YYYY format.
+        end_date (str): The end date for the hold mail in MM/DD/YYYY format.
+
+    Result:
+        The user's mail will be held by USPS for the given date range.
+    """
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=False
@@ -22,18 +38,18 @@ def usps_hold_mail(
         page.goto("https://holdmail.usps.com/holdmail")
 
         # Log in
-        page.get_by_label("* Username").click()
-        page.get_by_label("* Username").fill(username)
-        page.get_by_label("* Password").click()
-        page.get_by_label("* Password").fill(password)
-        page.get_by_role("button", name="Sign In").click()
+        # page.get_by_label("* Username").click()
+        # page.get_by_label("* Username").fill(username)
+        # page.get_by_label("* Password").click()
+        # page.get_by_label("* Password").fill(password)
+        # page.get_by_role("button", name="Sign In").click()
 
         # Click "Check availability" on the hold mail page
         page.get_by_role("button", name="Check Availability").click()
 
         # Select the start and end dates
-        page.locator("#start-date").fill(start_date.strftime('%m/%d/%Y'))
-        page.locator("#end-date").fill(end_date.strftime('%m/%d/%Y'))
+        page.locator("#start-date").fill(start_date)
+        page.locator("#end-date").fill(end_date)
 
         # Click "Schedule Hold Mail"
         # (uncomment to actually schedule the mail hold)
@@ -41,11 +57,15 @@ def usps_hold_mail(
         import pdb; pdb.set_trace()
 
 
+usps_hold_mail_function = SpeckFunction(
+    name=NAME,
+    func=usps_hold_mail
+)
+
+
 # Used for testing
 if __name__ == '__main__':
     usps_hold_mail(
-        username="<your username goes here>",
-        password="<your password goes here>",
-        start_date=datetime.date(2024, 7, 25),
-        end_date=datetime.date(2024, 7, 30)
+        start_date=datetime.date(2024, 8, 25),
+        end_date=datetime.date(2024, 8, 30)
     )

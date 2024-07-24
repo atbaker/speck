@@ -27,6 +27,7 @@ def evaluate_with_validation(
         "prompt": prompt,
         "cache_prompt": True,
         "grammar": grammar,
+        "temperature": 0.2,
         "stream": True,
         "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
         # "stop": ["<|endoftext|>"], # Phi 3

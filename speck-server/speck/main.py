@@ -22,11 +22,6 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     multiprocessing.set_start_method('spawn')
 
-    # Create the database tables
-    from sqlmodel import SQLModel
-    from config import db_engine
-    SQLModel.metadata.create_all(db_engine)
-
     # Create a multiprocessing Manager to use for the cache and task manager
     from multiprocessing import Manager
     manager = Manager()
@@ -42,8 +37,16 @@ if __name__ == "__main__":
         ('emails.tasks.sync_inbox', 60, (), {})  # (task, interval in seconds, args, kwargs)
     ]
 
-    # Start the background task manager
+    # Import and initialize the settings
     from config import settings
+
+    # Create the database tables
+    from sqlmodel import SQLModel
+    from config import db_engine
+    from emails import models as email_models
+    SQLModel.metadata.create_all(db_engine)
+
+    # Start the background task manager
     from core.task_manager import initialize_task_manager
     task_manager = initialize_task_manager(
         cache_manager_dict=cache_manager_dict,

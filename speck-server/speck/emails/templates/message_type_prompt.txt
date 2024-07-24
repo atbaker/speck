@@ -1,16 +1,5 @@
 <context>
-Here is an email:
-
-From: {{ message.from_ }}
-To: {{ message.to }}
-CC: {{ message.cc }}
-BCC: {{ message.bcc }}
-Subject: {{ message.subject }}
-Received: {{ message.received_at }}
-
-Message contents:
-
-{{ message.body }}
+{% include "_message_details.txt" %}
 </context>
 
 <instructions>

@@ -1,0 +1,13 @@
+Here is an email:
+<email-message>
+<from>{{ message.from_ }}</from>
+<to>{{ message.to }}</to>
+<cc>{{ message.cc }}</cc>
+<bcc>{{ message.bcc }}</bcc>
+<subject>{{ message.subject }}</subject>
+<received-at>{{ message.received_at }}</received-at>
+
+<body>
+{{ message.body }}
+</body>
+</email-message>

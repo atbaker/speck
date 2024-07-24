@@ -1,0 +1,25 @@
+<context>
+{% include "_message_details.txt" %}
+</context>
+
+<instructions>
+{{ instructions }}
+
+<speck-library>
+{% for func_name, func_details in speck_library.functions.items() %}
+<speck-function>
+<name>
+{{ func_name }}
+</name>
+
+<parameters>
+{{ func_details.parameters }}
+</parameters>
+
+<description>
+{{ func_details.description }}
+</description>
+</speck-function>
+{% endfor %}
+</speck-library>
+</instructions>
