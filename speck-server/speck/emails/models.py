@@ -2,33 +2,34 @@ import base64
 from datetime import datetime
 import enum
 import email
+import uuid
 import html2text
 import pendulum
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Column, Enum, Field, Session, SQLModel, Relationship, select, delete
-from typing import List, Optional
+from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Relationship, select, delete
+from typing import List, Literal, Optional
 
 from config import db_engine, template_env
 from core.utils import run_llamafile_completion
 from core.task_manager import task_manager
-from library import speck_library
+from library import speck_library, FunctionResult
 
 from .utils import get_gmail_api_client
 
 
 class Mailbox(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
+    id: int | None = SQLModelField(default=None, primary_key=True)
 
-    email_address: str = Field(unique=True)
+    email_address: str = SQLModelField(unique=True)
 
     last_history_id: int | None = None
     last_synced_at: datetime | None = None
 
     messages: list['Message'] = Relationship(back_populates='mailbox')
 
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = SQLModelField(default_factory=datetime.now)
 
     def sync_inbox(self, session=None):
         """
@@ -155,6 +156,7 @@ class Mailbox(SQLModel, table=True):
                 'id': message.id,
                 'message_type': message.message_type,
                 'summary': message.summary,
+                'selected_functions': message.selected_functions,
             }
         return mailbox_data
 
@@ -264,6 +266,7 @@ class SelectedFunctionArgument(BaseModel):
 class SelectedFunction(BaseModel):
     name: str
     arguments: Optional[List[SelectedFunctionArgument]] = None
+    button_text: str
     reason: str
 
     @field_validator('name')
@@ -272,35 +275,43 @@ class SelectedFunction(BaseModel):
             raise ValueError(f"Function '{v}' is not in the Speck library. Do not invent new functions, only return functions that are already in the Speck library.")
         return v
 
-class Message(SQLModel, table=True):
-    id: str | None = Field(default=None, primary_key=True)
+class ExecutedFunction(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    arguments: Optional[List[SelectedFunctionArgument]] = None
+    status: Literal['pending', 'success', 'error'] = 'pending'
+    result: FunctionResult | None = None
 
-    mailbox_id: int = Field(default=None, foreign_key='mailbox.id')
+class Message(SQLModel, table=True):
+    id: str | None = SQLModelField(default=None, primary_key=True)
+
+    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
     mailbox: Mailbox = Relationship(back_populates='messages')
 
     raw: str
 
     thread_id: str
-    label_ids: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    label_ids: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
 
     from_: str
-    to: List[str] = Field(default_factory=list, sa_column=Column(JSON))
-    cc: List[str] = Field(default_factory=list, sa_column=Column(JSON))
-    bcc: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    to: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    cc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    bcc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
     subject: str
     received_at: datetime
     body: str
 
-    message_type: MessageType | None = Field(default=None, sa_column=Column(Enum(MessageType)))
-    actions: List[MessageAction] = Field(default_factory=list, sa_column=Column(JSON))
-    action_necessary: ActionNecessity | None = Field(default=None, sa_column=Column(Enum(ActionNecessity)))
-    action_urgency: ActionUrgency | None = Field(default=None, sa_column=Column(Enum(ActionUrgency)))
+    message_type: MessageType | None = SQLModelField(default=None, sa_column=Column(Enum(MessageType)))
+    actions: List[MessageAction] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    action_necessary: ActionNecessity | None = SQLModelField(default=None, sa_column=Column(Enum(ActionNecessity)))
+    action_urgency: ActionUrgency | None = SQLModelField(default=None, sa_column=Column(Enum(ActionUrgency)))
     summary: str | None = None
 
-    functions_analyzed: bool = Field(default=False)
-    selected_functions: List[SelectedFunction] = Field(default_factory=list, sa_column=Column(JSON))
+    functions_analyzed: bool = SQLModelField(default=False)
+    selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
+    executed_functions: dict[str, ExecutedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
 
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = SQLModelField(default_factory=datetime.now)
 
     @property
     def processed(self):
@@ -429,7 +440,7 @@ class Message(SQLModel, table=True):
 
         prompt = template_env.get_template('select_functions_prompt.txt').render(
             message=self,
-            instructions="Speck Functions are the functions that Speck can perform on behalf of the user. Based on the contents of the email, determine which Speck functions, if any, are relevant. If a function is relevant, identify the function, the arguments it requires, and the reason for its relevance. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_chosen' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
+            instructions="You curate functions from the Speck Functions Library based on the contents of an email message. Using the metadata and contents of this email, determine if the email indicates any problems which could be solved by Speck Functions. If a function is relevant, identify the function, the arguments it requires, the text which should appear in the button the user can click to perform the function, and the reason for this function's relevance. For most email messages, no Speck Functions will be relevant, and so you should set the 'no_functions_chosen' field to true. Do not propose functions which assist the sender of an email — stay focused on the needs of your user, the recipient. Do not invent new functions, only return functions that are already in the Speck library.",
             speck_library=speck_library
         )
         result = run_llamafile_completion(
@@ -438,5 +449,24 @@ class Message(SQLModel, table=True):
         )
 
         if result.functions is not None:
-            self.selected_functions = [func.model_dump_json() for func in result.functions]
+            self.selected_functions = {func.name: func.model_dump_json() for func in result.functions}
         self.functions_analyzed = True
+
+    def execute_function(self, function_name: str):
+        """Execute a Speck Function based on this message."""
+        # Get the SelectedFunction
+        selected_function = self.selected_functions[function_name]
+
+        # Create an ExecutedFunction object
+        executed_function = ExecutedFunction(
+            name=selected_function.name,
+            arguments=selected_function.arguments,
+        )
+        self.executed_functions[executed_function.id] = executed_function
+
+        from .tasks import execute_function_for_message
+        task_manager.add_task(
+            task=execute_function_for_message,
+            message_id=self.id,
+            executed_function_id=executed_function.id
+        )

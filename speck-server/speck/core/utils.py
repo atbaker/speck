@@ -43,6 +43,7 @@ def evaluate_with_validation(
                 )
                 content += data['content']
                 logger.debug(f"LLM partial response: {content}")
+                print(f"LLM partial response: {content}")
             except json.JSONDecodeError:
                 logger.error(f"Failed to decode JSON: {text}")
                 raise

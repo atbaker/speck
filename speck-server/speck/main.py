@@ -25,12 +25,10 @@ if __name__ == "__main__":
     # Create a multiprocessing Manager to use for the cache and task manager
     from multiprocessing import Manager
     manager = Manager()
-    cache_manager_dict = manager.dict()
-    cache_manager_lock = manager.Lock()
 
     # Initialize the cache
     from core.cache import initialize_cache
-    initialize_cache(cache_manager_dict, cache_manager_lock)
+    initialize_cache(manager=manager)
 
     # Define the recurring tasks
     recurring_tasks = [
@@ -49,8 +47,6 @@ if __name__ == "__main__":
     # Start the background task manager
     from core.task_manager import initialize_task_manager
     task_manager = initialize_task_manager(
-        cache_manager_dict=cache_manager_dict,
-        cache_manager_lock=cache_manager_lock,
         log_file=settings.task_manager_log_file,
         recurring_tasks=recurring_tasks
     )

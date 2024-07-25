@@ -20,7 +20,15 @@ class SharedCache:
 
 cache = None
 
-def initialize_cache(cache_manager_dict, cache_manager_lock):
+def initialize_cache(
+        manager=None,
+        cache_manager_dict=None,
+        cache_manager_lock=None):
+    # If cache_manager_dict and cache_manager_lock are not provided, use the manager to create them
+    if cache_manager_dict is None or cache_manager_lock is None:
+        cache_manager_dict = manager.dict()
+        cache_manager_lock = manager.Lock()
+
     global cache
     cache = SharedCache(cache_manager_dict, cache_manager_lock)
 

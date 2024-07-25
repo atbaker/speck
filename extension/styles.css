@@ -27,20 +27,20 @@
     color: #333;
 }
 
-#start-recording {
-    margin-top: 10px;
-    padding: 10px 20px;
-    border-radius: 5px;
-    background: #4CAF50;
+.speck-function-button {
+    background-color: #4CAF50; /* Complementary color */
     color: white;
     border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    margin-top: 10px;
     cursor: pointer;
     font-size: 14px;
-    transition: background 0.3s ease;
+    transition: background-color 0.3s ease;
 }
 
-#start-recording:hover {
-    background: #45a049;
+.speck-function-button:hover {
+    background-color: #45a049; /* Darker shade for hover effect */
 }
 
 @media (max-width: 768px) {

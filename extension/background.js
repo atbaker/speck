@@ -1,8 +1,5 @@
 let mailbox_messages = {};
 let socket = null;
-let currentThreadId = null;
-let recording = false;
-let scenarioLog = [];
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Extension installed');
@@ -17,6 +14,7 @@ function connectWebSocket() {
   };
 
   socket.onmessage = (event) => {
+    console.log('WebSocket message received:', event);
     const data = JSON.parse(event.data);
     if (data.type === 'mailbox') {
       mailbox_messages = data.messages;
@@ -36,41 +34,21 @@ function connectWebSocket() {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Message received in background script:", message);
+
   if (message.action === 'get_message_details') {
     const messageDetails = mailbox_messages[message.threadId] || 'No message available.';
     sendResponse(messageDetails);
-  } else if (message.action === 'start_recording') {
-    currentThreadId = message.threadId;
-    recording = true;
-    scenarioLog = [];
-    chrome.tabs.create({ url: 'https://www.usps.com' }, (tab) => {
-      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-        if (info.status === 'complete' && tabId === tab.id) {
-          chrome.tabs.onUpdated.removeListener(listener);
-          console.log("Sending start recording message to content script");
-          chrome.tabs.sendMessage(tab.id, { action: "start_recording", threadId: currentThreadId }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.error("Error sending message to content script:", chrome.runtime.lastError);
-            } else {
-              console.log("Message sent to content script successfully", response);
-            }
-          });
-        }
-      });
-    });
-  } else if (message.action === 'stop_recording') {
-    recording = false;
+  } else if (message.action === 'execute_function') {
+    const payload = {
+      action: 'execute_function',
+      args: message.args
+    };
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ action: 'stop_recording', scenarioLog: scenarioLog }));
+      socket.send(JSON.stringify(payload));
     } else {
-      console.error('WebSocket is not open. Cannot send message.');
+      console.error('WebSocket is not open');
     }
-  } else if (message.action === 'log_action') {
-    if (recording) {
-      scenarioLog.push(message.entry);
-    }
-  } else if (message.action === 'get_recording_state') {
-    sendResponse({ recording: recording, threadId: currentThreadId });
   }
+
   return true; // Required to indicate that the response will be sent asynchronously
 });
