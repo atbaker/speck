@@ -189,9 +189,11 @@ class TaskManager:
             if self.parent_conn.poll(1):  # Check if there is a message
                 task_name = self.parent_conn.recv()
 
-                # Notify the event system after completing a process_new_message task
-                if task_name == "process_new_message":
-                    print('Pushing mailbox state to event system')
+                # Use the event system to push a Mailbox state update after
+                # completing a process_new_message task or a execute_function_for_message
+                # task
+                if task_name in ("process_new_message", "execute_function_for_message"):
+                    self.logger.info('Pushing mailbox state to event system')
                     # TODO: Should probably make this a Mailbox class method
                     from emails.models import Mailbox
                     with Session(db_engine) as session:

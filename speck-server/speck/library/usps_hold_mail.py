@@ -13,7 +13,8 @@ def usps_hold_mail(
     """
     <overview>
     Schedules a USPS hold mail for the user on usps.com, for a given
-    date range.
+    date range. Used so that a user's mail is not delivered to their home
+    while they are away on a trip.
     </overview>
 
     <relevant-message-types>
@@ -39,7 +40,7 @@ def usps_hold_mail(
 
     <example-usage>
         <example>
-            <relevant-email-content>
+            <example-email-from-another-user>
                 **Andrew,  
                 you're all set.**  
                 We can't wait to see you on board. Before you fly, view full reservation
@@ -97,7 +98,7 @@ def usps_hold_mail(
                 ---  
                 **SFO**  
                 San Francisco
-            </relevant-email-content>
+            </example-email-from-another-user>
             <correct-arguments>
                 start_date="08/14/2024"
                 end_date="08/21/2024"
@@ -111,7 +112,7 @@ def usps_hold_mail(
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=False,
-            slow_mo=2000 # For demo purposes
+            slow_mo=1500 # For demo purposes
         )
         context = browser.new_context()
         page = context.new_page()
@@ -135,14 +136,13 @@ def usps_hold_mail(
 
         # Click "Schedule Hold Mail"
         # (uncomment to actually schedule the mail hold)
-        # page.get_by_role("button", name="Schedule Hold Mail").click()
+        page.get_by_role("button", name="Schedule Hold Mail").click()
 
-        # TODO: Write a statement which checks that the hold mail was scheduled successfully
-        from time import sleep
-        sleep(2)
+        confirmation_span = page.get_by_text('Your Confirmation Number').first
+        confirmation_number = confirmation_span.text_content().split(':')[1].strip()
 
         # Return a success message
-        return f"Hold mail scheduled successfully starting {start_date} and ending {end_date}"
+        return f"Hold mail scheduled successfully starting {start_date} and ending {end_date} with confirmation number {confirmation_number}"
 
 
 usps_hold_mail_function = SpeckFunction(

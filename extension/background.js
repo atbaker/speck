@@ -6,6 +6,11 @@ chrome.runtime.onInstalled.addListener(() => {
   connectWebSocket();
 });
 
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Extension started');
+  connectWebSocket();
+});
+
 function connectWebSocket() {
   socket = new WebSocket('ws://127.0.0.1:17725/ws');
   

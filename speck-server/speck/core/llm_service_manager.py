@@ -31,7 +31,9 @@ class LLMServiceManager:
 
     def start_llamafile_process(self):
         # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
-        model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
+        # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
+        model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
+        # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q4_K_M.gguf')
         # model_path = os.path.join(settings.models_dir, 'Phi-3-mini-4k-instruct-q4.gguf')
         # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q6_K.gguf')
         # model_path = os.path.join(settings.models_dir, 'Mistral-Nemo-Instruct-2407-Q6_K.gguf')
@@ -55,8 +57,9 @@ class LLMServiceManager:
             model_path
         ]
 
+        # Start the process with lower priority on macOS
         if settings.os_name == 'Darwin':
-            llamafile_process_args = ['sh'] + llamafile_process_args
+            llamafile_process_args = ['nice', '-n', '10'] + llamafile_process_args
 
         try:
             process = subprocess.Popen(
@@ -65,6 +68,11 @@ class LLMServiceManager:
                 stderr=self.stderr_log,
                 text=True
             )
+
+            # Set the process to have low priority on Windows
+            if settings.os_name == 'Windows':
+                p = psutil.Process(process.pid)
+                p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
             # Poll the /health endpoint until the server is ready
             health_url = "http://127.0.0.1:17726/health"

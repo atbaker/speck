@@ -5,7 +5,7 @@
 </general-context>
 {% endwith %}
 
-<email-message>
+<email-message-user-received>
     <from>{{ message.from_ }}</from>
     <to>{{ message.to }}</to>
     <cc>{{ message.cc }}</cc>
@@ -23,4 +23,4 @@
     <body>
     {{ message.body }}
     </body>
-</email-message>
+</email-message-user-received>

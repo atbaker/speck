@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, List, Optional, get_type_hints, Callable, Dict
 from pydantic import BaseModel, Field, model_validator
 
@@ -28,6 +29,7 @@ class FunctionResult(BaseModel):
     success: bool
     success_message: Optional[str] = None
     error_message: Optional[str] = None
+    executed_at: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class SpeckLibrary(BaseModel):

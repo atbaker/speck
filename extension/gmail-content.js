@@ -59,16 +59,18 @@ function insertSpeckDiv() {
         }
 
         // Add executed functions history
-        if (messageDetails.executed_functions) {
+        if (messageDetails.executed_functions && Object.keys(messageDetails.executed_functions).length > 0) {
           const historyTitle = document.createElement('strong');
           historyTitle.innerText = 'Function history:';
+          historyTitle.style.marginTop = '10px'; // Add spacing above the heading
           speckDiv.appendChild(historyTitle);
 
           const historyList = document.createElement('ul');
           Object.values(messageDetails.executed_functions).forEach(func => {
             const funcObj = JSON.parse(func);
             const listItem = document.createElement('li');
-            listItem.innerText = `${funcObj.name} - ${funcObj.status}: ${funcObj.status === 'success' ? funcObj.result.success_message : funcObj.result.error_message}`;
+            const createdDate = new Date(funcObj.result.executed_at).toLocaleString();
+            listItem.innerText = `${funcObj.name} - ${funcObj.status}: ${funcObj.status === 'success' ? funcObj.result.success_message : funcObj.result.error_message} (Executed on: ${createdDate})`;
             historyList.appendChild(listItem);
           });
           speckDiv.appendChild(historyList);
