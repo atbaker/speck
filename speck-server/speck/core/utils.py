@@ -1,5 +1,6 @@
 import json
 import os
+from typing import List, Optional
 from pydantic import BaseModel, ValidationError
 import httpx
 import logging
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 def evaluate_with_validation(
     prompt: str,
     grammar: str,
-    model: BaseModel,
+    return_model: BaseModel,
     max_retries: int = 3
 ) -> BaseModel:
     """
@@ -31,26 +32,61 @@ def evaluate_with_validation(
         "stream": True,
         "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
         # "stop": ["<|endoftext|>"], # Phi 3
+        # "stop": ["<|eot_id|>"] # Llama 3
     }
 
     # Stream the response, so we can abort and retry quickly if the LLM gets stuck
     content = ''
-    with httpx.stream('POST', "http://localhost:17726/completion", json=data, timeout=180) as response:
-        for text in response.iter_text():
-            try:
-                data = json.loads(
-                    text.strip('data :') # Strip out "data :" prefix
-                )
-                content += data['content']
+    whitespace_char_count = 0
+    max_whitespace_char_count = 5
+
+    try:
+        with httpx.stream('POST', "http://localhost:17726/completion", json=data, timeout=180) as response:
+            for text in response.iter_text():
+                try:
+                    data = json.loads(
+                        text.strip('data :') # Strip out "data :" prefix
+                    )
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to decode JSON: {text}")
+                    raise
+
+                new_content = data['content']
+
+                # Increment whitespace character count if we see new whitespace, otherwise reset it
+                if new_content.strip() == '':
+                    whitespace_char_count += 1
+                else:
+                    whitespace_char_count = 0
+
+                # If we've seen too many whitespace characters in a row, assume the
+                # LLM is stuck and raise an exception
+                if whitespace_char_count > max_whitespace_char_count:
+                    raise ValueError(f"LLM generated too much whitespace: {content}")
+
+                # Otherwise, append the new content to the response
+                content += new_content
                 logger.debug(f"LLM partial response: {content}")
                 print(f"LLM partial response: {content}")
-            except json.JSONDecodeError:
-                logger.error(f"Failed to decode JSON: {text}")
-                raise
+
+    except ValueError as e:
+        # If we've exhausted all our retries, just re-raise the exception
+        if max_retries <= 0:
+            raise
+
+        # Otherwise, tell the LLM it got stuck and give it a chance to try again
+        logger.error(f"LLM generated too much whitespace: {content}")
+        prompt += f"\n\nYour previous attempt to respond to this prompt failed because you generated too much whitespace. Here is what you provided: {content}\n\nTry again to create a valid {return_model.__name__} object."
+        return evaluate_with_validation(
+            prompt,
+            grammar,
+            return_model,
+            max_retries - 1
+        )
 
     try:
         # Validate the response
-        result = model.model_validate_json(content)
+        result = return_model.model_validate_json(content)
     except ValidationError as e:
         # If we've exhausted all our retries, just re-raise the exception
         if max_retries <= 0:
@@ -59,11 +95,11 @@ def evaluate_with_validation(
         # If we hit validation errors, append the invalid output and error
         # message(s) to the prompt and try again
         logger.error(f"LLM response was invalid: {content} {e}")
-        prompt += f"\n\nYour output was invalid. Here is what you provided: {content}\n\nHere is the error message: {e}\n\nTry again to create a valid {model.__name__} object."
+        prompt += f"\n\nYour output was invalid. Here is what you provided: {content}\n\nHere is the error message: {e}\n\nTry again to create a valid {return_model.__name__} object."
         return evaluate_with_validation(
             prompt,
             grammar,
-            model,
+            return_model,
             max_retries - 1
         )
 
@@ -72,7 +108,8 @@ def evaluate_with_validation(
 
 def run_llamafile_completion(
     prompt: str,
-    model: BaseModel,
+    return_model: BaseModel,
+    nested_models: Optional[List[BaseModel]] = None,
     system_prompt: str = 'You write concise summaries of emails.'
 ) -> BaseModel:
     """
@@ -80,7 +117,7 @@ def run_llamafile_completion(
     """
     # Generate the GBNF grammar and documentation
     grammar, documentation = generate_gbnf_grammar_and_documentation(
-        pydantic_model_list=[model]
+        pydantic_model_list=[return_model] + (nested_models or [])
     )
 
     # Render a template with the model schema
@@ -99,7 +136,7 @@ def run_llamafile_completion(
     result = evaluate_with_validation(
         prompt_with_schema,
         grammar,
-        model
+        return_model
     )
 
     # Return the content

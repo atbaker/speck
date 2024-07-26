@@ -157,6 +157,7 @@ class Mailbox(SQLModel, table=True):
                 'message_type': message.message_type,
                 'summary': message.summary,
                 'selected_functions': message.selected_functions,
+                'executed_functions': message.executed_functions,
             }
         return mailbox_data
 
@@ -263,6 +264,9 @@ class SelectedFunctionArgument(BaseModel):
     name: str
     value: str
 
+    def as_kwarg(self):
+        return {self.name: self.value}
+
 class SelectedFunction(BaseModel):
     name: str
     arguments: Optional[List[SelectedFunctionArgument]] = None
@@ -274,6 +278,9 @@ class SelectedFunction(BaseModel):
         if v not in speck_library.functions:
             raise ValueError(f"Function '{v}' is not in the Speck library. Do not invent new functions, only return functions that are already in the Speck library.")
         return v
+
+    def get_args_as_kwargs(self):
+        return {arg.name: arg.value for arg in self.arguments}
 
 class ExecutedFunction(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -315,7 +322,7 @@ class Message(SQLModel, table=True):
 
     @property
     def processed(self):
-        return self.message_type is not None and self.summary is not None and self.action_necessary is not None
+        return self.message_type is not None and self.summary is not None and self.functions_analyzed
 
     def analyze_and_process(self):
         """Analyze a new message and process it."""
@@ -323,6 +330,13 @@ class Message(SQLModel, table=True):
         self.generate_summary()
         self.analyze_actions_and_urgency()
         self.select_functions()
+
+    def get_general_context(self):
+        """Get the general context of the message."""
+        return {
+            'current_datetime': str(pendulum.now()),
+            'user_email_address': self.mailbox.email_address,
+        }
 
     def set_type(self):
         """Categorize the message based on its contents."""
@@ -340,7 +354,8 @@ class Message(SQLModel, table=True):
         )
         result = run_llamafile_completion(
             prompt=prompt,
-            model=CategorizeMessageType
+            return_model=CategorizeMessageType,
+            nested_models=[MessageType]
         )
 
         self.message_type = result.type
@@ -360,7 +375,7 @@ class Message(SQLModel, table=True):
         )
         result = run_llamafile_completion(
             prompt=prompt,
-            model=MessageSummary
+            return_model=MessageSummary
         )
 
         self.summary = result.summary
@@ -435,17 +450,18 @@ class Message(SQLModel, table=True):
             return
 
         class SelectedFunctions(BaseModel):
-            no_functions_chosen: bool = Field(default=True)
+            no_functions_selected: bool = Field(default=True)
             functions: Optional[List[SelectedFunction]] = None
 
         prompt = template_env.get_template('select_functions_prompt.txt').render(
             message=self,
-            instructions="You curate functions from the Speck Functions Library based on the contents of an email message. Using the metadata and contents of this email, determine if the email indicates any problems which could be solved by Speck Functions. If a function is relevant, identify the function, the arguments it requires, the text which should appear in the button the user can click to perform the function, and the reason for this function's relevance. For most email messages, no Speck Functions will be relevant, and so you should set the 'no_functions_chosen' field to true. Do not propose functions which assist the sender of an email — stay focused on the needs of your user, the recipient. Do not invent new functions, only return functions that are already in the Speck library.",
+            instructions="Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
             speck_library=speck_library
         )
         result = run_llamafile_completion(
             prompt=prompt,
-            model=SelectedFunctions
+            return_model=SelectedFunctions,
+            nested_models=[SelectedFunction, SelectedFunctionArgument]
         )
 
         if result.functions is not None:
@@ -455,18 +471,27 @@ class Message(SQLModel, table=True):
     def execute_function(self, function_name: str):
         """Execute a Speck Function based on this message."""
         # Get the SelectedFunction
-        selected_function = self.selected_functions[function_name]
+        selected_function = SelectedFunction.model_validate_json(
+            self.selected_functions[function_name]
+        )
+
+        # Run the function
+        result = speck_library.execute_function(
+            function_name=selected_function.name,
+            arguments=selected_function.get_args_as_kwargs()
+        )
 
         # Create an ExecutedFunction object
         executed_function = ExecutedFunction(
             name=selected_function.name,
             arguments=selected_function.arguments,
+            status='success' if result.success else 'error',
+            result=result
         )
-        self.executed_functions[executed_function.id] = executed_function
 
-        from .tasks import execute_function_for_message
-        task_manager.add_task(
-            task=execute_function_for_message,
-            message_id=self.id,
-            executed_function_id=executed_function.id
-        )
+        # TODO: SQLAlchemy can't track mutations of JSON dicts without using a custom type,
+        # so for now just replace the whole dict
+        self.executed_functions = {
+            **self.executed_functions,
+            executed_function.id: executed_function.model_dump_json()
+        }

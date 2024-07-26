@@ -47,15 +47,31 @@ function insertSpeckDiv() {
 
         // Add buttons for each selected function
         if (messageDetails.selected_functions) {
-          messageDetails.selected_functions.forEach(func => {
+          Object.values(messageDetails.selected_functions).forEach(func => {
             const funcObj = JSON.parse(func);
             const button = document.createElement('button');
             button.innerText = `✨ ${funcObj.button_text}`;
             button.className = 'speck-function-button';
             button.setAttribute('data-message-id', threadId);
-            button.setAttribute('data-function-name', funcObj.function_name);
+            button.setAttribute('data-function-name', funcObj.name);
             speckDiv.appendChild(button);
           });
+        }
+
+        // Add executed functions history
+        if (messageDetails.executed_functions) {
+          const historyTitle = document.createElement('strong');
+          historyTitle.innerText = 'Function history:';
+          speckDiv.appendChild(historyTitle);
+
+          const historyList = document.createElement('ul');
+          Object.values(messageDetails.executed_functions).forEach(func => {
+            const funcObj = JSON.parse(func);
+            const listItem = document.createElement('li');
+            listItem.innerText = `${funcObj.name} - ${funcObj.status}: ${funcObj.status === 'success' ? funcObj.result.success_message : funcObj.result.error_message}`;
+            historyList.appendChild(listItem);
+          });
+          speckDiv.appendChild(historyList);
         }
       }).catch(error => {
         console.error('Error fetching message details:', error);

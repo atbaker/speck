@@ -11,19 +11,107 @@ def usps_hold_mail(
         end_date: str
 ):
     """
+    <overview>
     Schedules a USPS hold mail for the user on usps.com, for a given
     date range.
+    </overview>
 
-    Parameters:
+    <relevant-message-types>
+        - Correspondence
+        - Tickets and Bookings
+    </relevant-message-types>
+
+    <use-cases>
+        <use-case>
+            When the user has upcoming travel which likely takes them away
+            from home.
+        </use-case>
+        <use-case>
+            When the user has purchased airfare, indicating they are likely to
+            travel soon.
+        </use-case>
+    </use-cases>
+
+    <parameters>
         start_date (str): The start date for the hold mail in MM/DD/YYYY format.
         end_date (str): The end date for the hold mail in MM/DD/YYYY format.
+    </parameters>
 
-    Outcome:
-        The user's mail will be held by USPS for the given date range.
+    <example-usage>
+        <example>
+            <relevant-email-content>
+                **Andrew,  
+                you're all set.**  
+                We can't wait to see you on board. Before you fly, view full reservation
+                details or make changes to your flight online.  
+                ---  
+                |  MANAGE TRIP  
+                ---  
+                Confirmation code:  
+                **INDXPU**  
+                ---  
+                |  |  |  |  **Alaska**   
+                Flight 1289  
+                Boeing 737-900 (Winglets)  
+                ---  
+                
+                **Traveler(s)**  
+                ---  
+                Andrew Baker  
+                Seat: 22C Class: G (Coach)  
+                
+                |  |  **Wed, Aug 14  
+                10:15 AM **  
+                ---  
+                **SFO**  
+                San Francisco  
+                
+                ---  
+                
+                **Wed, Aug 14  
+                12:27 PM **  
+                ---  
+                **SEA**  
+                Seattle  
+                
+                |  |  **Alaska**   
+                Flight 1166  
+                Boeing 737-900 (Winglets)  
+                ---  
+                
+                **Traveler(s)**  
+                ---  
+                Andrew Baker  
+                Seat: 22D Class: G (Coach)  
+                
+                |  |  **Wed, Aug 21  
+                07:00 AM **  
+                ---  
+                **SEA**  
+                Seattle  
+                
+                ---  
+                
+                **Wed, Aug 21  
+                09:14 AM **  
+                ---  
+                **SFO**  
+                San Francisco
+            </relevant-email-content>
+            <correct-arguments>
+                start_date="08/14/2024"
+                end_date="08/21/2024"
+            </correct-arguments>
+            <example-button-text>
+                Schedule USPS hold mail from 08/14/2024 to 08/21/2024
+            </example-button-text>
+        </example>
+    </example-usage>
     """
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
-            headless=False
+            headless=False,
+            slow_mo=2000 # For demo purposes
         )
         context = browser.new_context()
         page = context.new_page()
@@ -48,7 +136,10 @@ def usps_hold_mail(
         # Click "Schedule Hold Mail"
         # (uncomment to actually schedule the mail hold)
         # page.get_by_role("button", name="Schedule Hold Mail").click()
-        import pdb; pdb.set_trace()
+
+        # TODO: Write a statement which checks that the hold mail was scheduled successfully
+        from time import sleep
+        sleep(2)
 
         # Return a success message
         return f"Hold mail scheduled successfully starting {start_date} and ending {end_date}"

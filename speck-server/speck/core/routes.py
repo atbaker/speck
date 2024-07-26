@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from config import db_engine
 from core.event_manager import event_manager
+from core.task_manager import task_manager
 from emails.models import Mailbox, Message
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,13 @@ async def websocket_endpoint(websocket: WebSocket):
             if action == 'execute_function':
                 message_id = message['args']['message_id']
                 function_name = message['args']['function_name']
-                with Session(db_engine) as session:
-                    try:
-                        msg = session.exec(select(Message).where(Message.id == message_id)).one()
-                        msg.execute_function(function_name)
-                    except NoResultFound:
-                        logger.error(f"Message {message_id} not found")
+
+                from emails.tasks import execute_function_for_message
+                task_manager.add_task(
+                    task=execute_function_for_message,
+                    message_id=message_id,
+                    function_name=function_name
+                )
+
     except WebSocketDisconnect:
         event_manager.disconnect(websocket)

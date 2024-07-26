@@ -38,18 +38,20 @@ if __name__ == "__main__":
     # Import and initialize the settings
     from config import settings
 
+    # Initialize the task manager
+    from core.task_manager import initialize_task_manager
+    task_manager = initialize_task_manager(
+        log_file=settings.task_manager_log_file,
+        recurring_tasks=recurring_tasks
+    )
+
     # Create the database tables
     from sqlmodel import SQLModel
     from config import db_engine
     from emails import models as email_models
     SQLModel.metadata.create_all(db_engine)
 
-    # Start the background task manager
-    from core.task_manager import initialize_task_manager
-    task_manager = initialize_task_manager(
-        log_file=settings.task_manager_log_file,
-        recurring_tasks=recurring_tasks
-    )
+    # Start the task manager
     task_manager.start(
         num_workers=1
     )

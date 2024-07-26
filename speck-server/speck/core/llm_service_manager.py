@@ -33,6 +33,8 @@ class LLMServiceManager:
         # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
         model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
         # model_path = os.path.join(settings.models_dir, 'Phi-3-mini-4k-instruct-q4.gguf')
+        # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q6_K.gguf')
+        # model_path = os.path.join(settings.models_dir, 'Mistral-Nemo-Instruct-2407-Q6_K.gguf')
 
         self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
         self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
@@ -45,9 +47,9 @@ class LLMServiceManager:
             '17726',
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
-            '--no-mmap', # Gemma 2 has weird behavior when using mmap :shrug:
+            '--no-mmap', # TODO: Figure out why Gemma 2 has weird behavior when using mmap
             '--ctx-size',
-            '8192', # 8k context window for Llama 3 and Gemma 2
+            '8192', # 8k context window for Gemma 2
             # '4096', # 4k context window for Phi 3
             '--model',
             model_path
