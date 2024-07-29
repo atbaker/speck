@@ -49,6 +49,7 @@ class LLMServiceManager:
             '17726',
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
+            '--no-warmup',
             '--no-mmap', # TODO: Figure out why Gemma 2 has weird behavior when using mmap
             '--ctx-size',
             '8192', # 8k context window for Gemma 2
