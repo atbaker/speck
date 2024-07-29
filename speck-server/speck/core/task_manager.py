@@ -182,7 +182,9 @@ class TaskManager:
                 worker.terminate()
                 worker.join()
 
-        self.queue_listener.stop()
+        # TODO: Couldn't get the queue listener to stop properly on Windows,
+        # commenting out for now
+        # self.queue_listener.stop()
 
     def watch_pipe(self):
         while not self._stop_event.is_set():

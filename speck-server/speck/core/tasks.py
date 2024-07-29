@@ -29,11 +29,29 @@ def install_browser():
     """
     A task run on startup to install the Playwright browser.
     """
-    logger.info('Installing browser')
+    logger.info('Installing browser...')
+
+    # Adapted from Playwright's __main__.py, to call the Playwright CLI directly
+    # https://github.com/microsoft/playwright-python/blob/main/playwright/__main__.py
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+    driver_executable, driver_cli = compute_driver_executable()
 
     try:
-        result = subprocess.run(['playwright', 'install', 'chromium'], check=True, capture_output=True, text=True)
-        logger.info(f'Browser installed successfully: {result.stdout}')
+        subprocess.run(
+            [
+                driver_executable,
+                driver_cli,
+            'install',
+                'chromium'
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=get_driver_env().update({
+                'PLAYWRIGHT_BROWSERS_PATH': settings.playwright_browsers_dir
+            })
+        )
+        logger.info(f'Browser installed successfully')
     except subprocess.CalledProcessError as e:
         logger.error(f'Failed to install browser: {e.stderr}')
 

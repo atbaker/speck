@@ -104,7 +104,7 @@ if (!gotTheLock) {
     // Handle deep link URL
     const url = commandLine.pop();
     log.info('Received deep link URL:', url);
-    if (url.startsWith('speck://receive-oauth-code')) {
+    if (url.includes('/receive-oauth-code')) {
       const parsedUrl = new URL(url);
       const code = parsedUrl.searchParams.get('code');
       forwardOAuthCode(code);
@@ -174,7 +174,7 @@ if (!gotTheLock) {
       const response = await axios.post('http://127.0.0.1:17725/receive-oauth-code', {
         code: code
       });
-      log.info('OAuth code processed successfully:', response.data);
+      log.info('OAuth code processed successfully');
     } catch (error) {
       log.error('Error processing OAuth code:', error);
     }
