@@ -35,7 +35,7 @@ class Mailbox(SQLModel, table=True):
         """
         Sync the Mailbox with the Gmail API.
 
-        - Fetch the list of emails currently in the user's inbox (limit to 100)
+        - Fetch the list of emails currently in the user's inbox (limit to 25 for proof of concept)
         - Create Message objects for new emails in the response
         - Delete old Message objects for emails that are no longer in the inbox
         """
@@ -43,7 +43,7 @@ class Mailbox(SQLModel, table=True):
 
         # Get all the message ids for messages in the user's inbox
         last_synced_at = pendulum.now()
-        response = client.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=100).execute()
+        response = client.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=25).execute()
         message_ids = [message['id'] for message in response['messages']]
 
         # Iterate over each message and fetch its details
@@ -276,7 +276,7 @@ class SelectedFunction(BaseModel):
     @field_validator('name')
     def name_must_exist_in_speck_library(cls, v):
         if v not in speck_library.functions:
-            raise ValueError(f"Function '{v}' is not in the Speck library. Do not invent new functions, only return functions that are already in the Speck library.")
+            raise ValueError(f"Function '{v}' is not in the Speck library. Do not invent new functions, only return functions that are already in the Speck library. If no function is relevant, set the 'no_functions_selected' field to true.")
         return v
 
     def get_args_as_kwargs(self):

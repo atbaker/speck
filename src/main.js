@@ -81,7 +81,10 @@ const createWindow = () => {
     height: 600,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-    },
+      contextIsolation: true,
+      enableRemoteModule: false,
+      nodeIntegration: false
+    }
   });
 
   mainWindow.loadFile('src/index.html');
@@ -117,12 +120,12 @@ if (!gotTheLock) {
       return;
     }
 
-    ipcMain.handle('ping', () => 'pong');
     ipcMain.handle('start-auth', async () => {
       shell.openExternal('https://atbaker.ngrok.io/authorize');
     });
-    ipcMain.handle('get-tokens', async () => {
-      return tokens;
+
+    ipcMain.on('open-external', (event, url) => {
+      shell.openExternal(url);
     });
 
     log.info("User data path: ", app.getPath('userData'));

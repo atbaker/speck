@@ -4,19 +4,21 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self'"
+      content="default-src 'self'; style-src 'self'; script-src 'self'"
     />
     <meta
       http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self'"
+      content="default-src 'self'; style-src 'self'; script-src 'self'"
     />
     <title>Speck</title>
+    <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <h1>Hello Speck!</h1>
-    <p>👋</p>
-    <p id="info"></p>
-    <button id="start-auth">Start Auth</button>
+    <div class="container">
+      <h1>Speck</h1>
+      <img src="./images/speck.gif" alt="Speck GIF">
+    </div>
+    <button id="start-auth">Connect Speck to your inbox</button>
     <script src="./renderer.js"></script>
   </body>
 </html>
