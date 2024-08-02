@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
     gcp_client_secret: str = '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'
     gcp_auth_uri: str = 'https://accounts.google.com/o/oauth2/auth'
-    gcp_redirect_uri: str = 'https://atbaker.ngrok.io/receive-oauth-code'
+    gcp_redirect_uri: str = 'https://www.myspeck.ai/redirect-to-app'
     gcp_token_uri: str = 'https://oauth2.googleapis.com/token'
     gcp_oauth_scopes: list = [
         'https://www.googleapis.com/auth/gmail.modify'

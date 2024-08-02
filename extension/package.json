@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "background.js",
   "scripts": {
+    "build:chrome": "cp manifest.chrome.json manifest.json",
+    "build:firefox": "cp manifest.firefox.json manifest.json",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

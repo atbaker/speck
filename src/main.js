@@ -120,10 +120,6 @@ if (!gotTheLock) {
       return;
     }
 
-    ipcMain.handle('start-auth', async () => {
-      shell.openExternal('https://atbaker.ngrok.io/authorize');
-    });
-
     ipcMain.on('open-external', (event, url) => {
       shell.openExternal(url);
     });

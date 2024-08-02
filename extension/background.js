@@ -1,12 +1,16 @@
+if (typeof browser === "undefined") {
+  var browser = chrome;
+}
+
 let mailbox_messages = {};
 let socket = null;
 
-chrome.runtime.onInstalled.addListener(() => {
+browser.runtime.onInstalled.addListener(() => {
   console.log('Extension installed');
   connectWebSocket();
 });
 
-chrome.runtime.onStartup.addListener(() => {
+browser.runtime.onStartup.addListener(() => {
   console.log('Extension started');
   connectWebSocket();
 });
@@ -37,7 +41,7 @@ function connectWebSocket() {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Message received in background script:", message);
 
   if (message.action === 'get_message_details') {
