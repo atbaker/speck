@@ -52,7 +52,7 @@ function insertSpeckDiv() {
             const button = document.createElement('button');
             button.innerText = `✨ ${funcObj.button_text}`;
             button.className = 'speck-function-button';
-            button.setAttribute('data-message-id', threadId);
+            button.setAttribute('data-thread-id', threadId);
             button.setAttribute('data-function-name', funcObj.name);
             speckDiv.appendChild(button);
           });
@@ -102,13 +102,13 @@ new MutationObserver(() => {
 document.addEventListener('click', function(event) {
   if (event.target.classList.contains('speck-function-button')) {
     const button = event.target;
-    const messageId = button.getAttribute('data-message-id');
+    const threadId = button.getAttribute('data-thread-id');
     const functionName = button.getAttribute('data-function-name');
 
     chrome.runtime.sendMessage({
       action: 'execute_function',
       args: {
-        message_id: messageId,
+        thread_id: threadId,
         function_name: functionName
       }
     });

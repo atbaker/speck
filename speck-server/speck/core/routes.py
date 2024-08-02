@@ -38,13 +38,13 @@ async def websocket_endpoint(websocket: WebSocket):
             action = message.get('action')
 
             if action == 'execute_function':
-                message_id = message['args']['message_id']
+                thread_id = message['args']['thread_id']
                 function_name = message['args']['function_name']
 
                 from emails.tasks import execute_function_for_message
                 task_manager.add_task(
                     task=execute_function_for_message,
-                    message_id=message_id,
+                    thread_id=thread_id,
                     function_name=function_name
                 )
 

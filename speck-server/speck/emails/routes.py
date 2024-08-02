@@ -12,6 +12,7 @@ from sqlalchemy.exc import NoResultFound
 from sqlmodel import select, Session
 
 from config import settings, get_db_session
+from core.task_manager import task_manager
 
 from .models import Mailbox, Message
 from .utils import get_gmail_api_client
@@ -93,7 +94,10 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
         session.add(mailbox)
         session.commit()
 
-    return {"status": "success", "access_token": token_data['access_token'], "refresh_token": token_data['refresh_token']}
+    # Kick off an initial sync of the mailbox
+    task_manager.add_task(mailbox.sync_inbox)
+
+    return {"status": "success"}
 
 
 @router.get('/test-sync-inbox')

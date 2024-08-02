@@ -46,7 +46,7 @@ def process_new_message(message_id: int):
         session.commit()
 
 def execute_function_for_message(
-        message_id: str,
+        thread_id: str,
         function_name: str
     ):
     """
@@ -54,9 +54,9 @@ def execute_function_for_message(
     """
     with Session(db_engine) as session:
         try:
-            message = session.exec(select(Message).where(Message.id == message_id)).one()
+            message = session.exec(select(Message).where(Message.thread_id == thread_id)).one()
         except NoResultFound:
-            raise ValueError(f"Message {message_id} not found, cannot execute function {function_name}")
+            raise ValueError(f"Message {thread_id} not found, cannot execute function {function_name}")
 
     # Execute the function
     message.execute_function(function_name)
