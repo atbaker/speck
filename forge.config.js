@@ -11,6 +11,9 @@ module.exports = {
       // Python source and build code
       'speck-server',
 
+      // Extension
+      'extension',
+
       // Miscellaneous
       '.gitignore',
       '.vscode',
