@@ -110,7 +110,7 @@ def usps_hold_mail(
     </example-usage>
     """
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
+        browser = playwright.firefox.launch(
             headless=False,
             slow_mo=1500 # For demo purposes
         )
@@ -122,9 +122,9 @@ def usps_hold_mail(
 
         # Log in
         page.get_by_label("* Username").click()
-        page.get_by_label("* Username").fill("<username>")
+        page.get_by_label("* Username").fill("<your username>")
         page.get_by_label("* Password").click()
-        page.get_by_label("* Password").fill("<password>")
+        page.get_by_label("* Password").fill("<your password>")
         page.get_by_role("button", name="Sign In").click()
 
         # Click "Check availability" on the hold mail page

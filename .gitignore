@@ -1,4 +1,5 @@
 ### speck-app
+extension/manifest.json
 speck-server/data
 speck-server/speck/llamafile
 

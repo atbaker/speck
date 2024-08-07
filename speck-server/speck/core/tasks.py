@@ -42,7 +42,7 @@ def install_browser():
                 driver_executable,
                 driver_cli,
             'install',
-                # 'chromium'
+                'chromium'
                 'firefox'
             ],
             check=True,
