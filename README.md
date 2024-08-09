@@ -4,22 +4,28 @@
 
 **Speck is an open-source, privacy-first local AI agent application.**
 
+What makes Speck different?
+
+- Speck is focused on non-research agent use cases
+- Speck tightly integrates with the user’s email inbox
+- Speck comes with built-in functions and the ability for users to record new ones
+- Speck is open source, privacy-first, and runs 100% locally
+
 Speck is currently a proof of concept. Speck will change a lot as it moves towards an MVP release, targeted for fall 2024.
 
-**You can still download, install, and try Speck yourself, however.** Here's what the Speck proof of concept can do:
+**You can still download and install Speck to try it yourself today.** Here's what the Speck proof of concept can do:
 
 - Install and run entirely locally on your macOS or Windows device
-- Download and configure a locally-running LLM to use for inference (using [Llamafile](https://github.com/Mozilla-Ocho/llamafile))
-- Connect your Gmail inbox via Google OAuth
+- Download and configure a locally-running LLM (run with [Llamafile](https://github.com/Mozilla-Ocho/llamafile))
+- Connect to your Gmail inbox via Google OAuth and a browser extension augmenting the Gmail UI
 - Sync a local copy of your inbox and analyze it using the LLM
-- Augment the Gmail web UI with additional information and capabilities
 - Generate a one-sentence summary for each email in your inbox
 - Identify and surface to the user relevant "Speck Functions" — Speck's agent capabilities — based on the the contents of your emails
-- Execute a Speck Function using arguments Speck identified and locally-running browser automation toolchain
+- Execute a Speck Function using arguments Speck identified, running in a local browser automation toolchain
 
 Speck currently contains just a single prototype Speck Function, called "[USPS hold mail](https://github.com/atbaker/speck/blob/f597bedef796e55fd37f6befe851e8e1eff0a6bd/speck-server/speck/library/usps_hold_mail.py#L9)". If Speck determines the user will be away from home soon, it will offer to [hold their mail with USPS](https://www.usps.com/manage/hold-mail.htm) for the duration of their trip.
 
-**Follow the [Quickstart](#quickstart) instructions to install Speck on your machine and try it for yourself.** All the capabilities listed above should work, though the final step where Speck interacts with usps.com requires some additional configuration — reach out to me if you'd like to experience that feature.
+**Follow the [Quickstart](#quickstart) instructions to install Speck on your machine and try it for yourself.** All the capabilities listed above should work, though the final step where Speck interacts with usps.com requires some additional configuration — reach out to me if you'd like to try that feature.
 
 Hit a snag in these instructions? Or maybe you have questions or thoughts? [Either way, I'd love to chat — please reach out!](https://www.linkedin.com/in/andrewtorkbaker/)
 
@@ -52,7 +58,7 @@ Follow these instructions to install Speck on your Mac:
 
 1. Download and unzip the Speck app `.zip` asset from [the latest Speck release](https://github.com/atbaker/speck/releases/latest). You want the filename that looks like `speck-app-darwin-arm64-0.0.1.zip`.
 
-1. Start the `speck-app.app` file you extracted from the zip archive. You should see a window pop up with the Speck logo and a button which says "Connect Speck to your inbox".
+1. Start the `speck-app.app` file you extracted from the zip archive. You should see a window open with the Speck logo and a button which says "Connect Speck to your inbox".
 
 1. Click the button to open your browser and authorize your local Speck installation to access your Gmail data.
 
@@ -121,7 +127,7 @@ To load the extension in your Chrome browser, follow these instructions [from Ch
 
 Speck's browser extension is not yet published in Firefox's add-ons directory, so you need to load it as a Temporary Add-on:
 
-**First, download and unzip the Firefox extension `.zip` asset from [the latest Speck release](https://github.com/atbaker/speck/releases/latest).** You want the filename that looks like `speck-firefox-extension-v0.0.1.zip`.
+**First, download and unzip the Firefox extension `.zip` asset from [the latest Speck release](https://github.com/atbaker/speck/releases/latest).** You want the filename that looks like `speck-firefox-extension-0.0.1.zip`.
 
 To load the extension in your Firefox browser, follow these instructions [from Mozilla's docs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Your_first_WebExtension#installing):
 
@@ -148,13 +154,13 @@ Speck has a few prerequisites for running locally. Before cloning the repo, make
 - [Python](https://docs.python-guide.org/starting/installation/)
 - The Python package manager [Poetry](https://python-poetry.org/)
 
-Then you'll be ready to proceed to installing Speck's dependencies.
+You're now ready to install Speck's dependencies.
 
 ### Install the dependencies
 
 1. [Clone this repository](https://github.com/atbaker/speck) to a directory on your machine
 
-2. Install the Node.js dependencies for the Speck Electron app:
+2. Install the Node.js dependencies for the Speck [Electron](https://www.electronjs.org/) app:
 
 ```
 npm install
