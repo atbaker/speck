@@ -5,6 +5,9 @@ const { execFile, exec } = require('child_process');
 const { URL } = require('url');
 const log = require('electron-log');
 
+// Don't run the app multiple times when using Squirrel on Windows
+if (require('electron-squirrel-startup')) app.quit();
+
 // Use the user application data directory for the log path
 log.transports.file.resolvePathFn = (variables) => {
   return path.join(app.getPath('userData'), 'logs', variables.fileName);
