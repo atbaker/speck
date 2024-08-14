@@ -2,7 +2,9 @@ import os
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
 from pydantic_settings import BaseSettings
+from sqlalchemy import event
 from sqlmodel import Session, create_engine
+import sqlite_vec
 import sys
 
 
@@ -67,6 +69,13 @@ db_engine = create_engine(settings.database_url)
 def get_db_session():
     with Session(db_engine) as session:
         yield session
+
+# Enable sqlite-vec for embedding storage
+@event.listens_for(db_engine, 'connect')
+def on_connect(connection, _):
+    connection.enable_load_extension(True)
+    sqlite_vec.load(connection)
+    connection.enable_load_extension(False)
 
 # Jinja2
 template_env = Environment(

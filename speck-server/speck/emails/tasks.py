@@ -45,6 +45,15 @@ def process_new_message(message_id: int):
         session.add(message)
         session.commit()
 
+def generate_embedding_for_message(message_id: int):
+    """
+    Generate an embedding for a given message.
+    """
+    with Session(db_engine) as session:
+        message = session.exec(select(Message).where(Message.id == message_id)).one()
+
+    message.generate_embedding()
+
 def execute_function_for_message(
         thread_id: str,
         function_name: str

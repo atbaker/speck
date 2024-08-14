@@ -9,21 +9,25 @@ from .utils import download_file
 logger = logging.getLogger(__name__)
 
 
-def set_up_llm_service():
+def download_models():
     """
-    A task run on startup to prepare the LLM service.
+    A task run on startup to download the models Llamafile will use. For now,
+    downloads two models: one for generating embeddings and one for generating
+    completions.
+    """
+    embedding_model_url = 'https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1/resolve/main/gguf/mxbai-embed-large-v1-f16.gguf?download=true'
+    embedding_model_output_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
+    download_file(embedding_model_url, embedding_model_output_path)
 
-    For now, simply ensures the model file is downloaded and ready.
-    """
     # url = 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf?download=true'
     # output_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
     # url = 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q6_K.gguf?download=true'
-    url = 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q5_K_M.gguf?download=true'
+    completion_model_url = 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q5_K_M.gguf?download=true'
     # url = 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf?download=true'
-    output_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
-    download_file(url, output_path)
+    completion_model_output_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
+    download_file(completion_model_url, completion_model_output_path)
 
-    logger.info('LLM service setup complete')
+    logger.info('Model download complete')
 
 def install_browser():
     """

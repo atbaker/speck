@@ -8,11 +8,13 @@ import pendulum
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Relationship, select, delete
+from sqlalchemy.orm import declared_attr
+from sqlite_vec import serialize_float32
+from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Relationship, select, delete, text, bindparam, BLOB
 from typing import List, Literal, Optional
 
 from config import db_engine, template_env
-from core.utils import run_llamafile_completion
+from core.utils import run_llamafile_completion, generate_llamafile_embedding
 from core.task_manager import task_manager
 from library import speck_library, FunctionResult
 
@@ -326,10 +328,11 @@ class Message(SQLModel, table=True):
 
     def analyze_and_process(self):
         """Analyze a new message and process it."""
-        self.set_type()
-        self.generate_summary()
-        self.analyze_actions_and_urgency()
-        self.select_functions()
+        self.generate_embedding()
+        # self.set_type()
+        # self.generate_summary()
+        # self.analyze_actions_and_urgency()
+        # self.select_functions()
 
     def get_general_context(self):
         """Get the general context of the message."""
@@ -495,3 +498,46 @@ class Message(SQLModel, table=True):
             **self.executed_functions,
             executed_function.id: executed_function.model_dump_json()
         }
+
+    def generate_embedding(self):
+        """Generate an embedding for the message."""
+        # Check if we already have an embedding
+        with Session(db_engine) as session:
+            try:
+                vec_message = session.exec(select(VecMessage).where(VecMessage.message_id == self.id)).one()
+
+                # If we do, return it
+                return vec_message
+            except NoResultFound:
+                # If we don't, generate it
+                pass
+
+        # Generate the embedding
+        embedding = generate_llamafile_embedding(self.body)
+
+        # Convert the result to a BLOB
+        embedding_blob = bytes(serialize_float32(embedding))
+
+        # Save it as a new VecMessage object
+        with Session(db_engine) as session:
+            vec_message = VecMessage(
+                message_id=self.id,
+                body_embedding=embedding_blob
+            )
+            session.add(vec_message)
+            session.commit()
+
+class VecMessage(SQLModel, table=True):
+    """
+    A virtual table that stores the embeddings of the messages.
+
+    NOTE: This is a virtual table that is created using the sqlite-vec extension,
+    not by SQLModel.
+    """
+    message_id: str | None = SQLModelField(default=None, primary_key=True)
+
+    body_embedding: bytes = SQLModelField(sa_column=Column(BLOB))
+
+    @declared_attr
+    def __tablename__(cls) -> str:
+        return 'vec_message'

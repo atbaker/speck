@@ -46,10 +46,8 @@ if __name__ == "__main__":
     )
 
     # Create the database tables
-    from sqlmodel import SQLModel
-    from config import db_engine
-    from emails import models as email_models
-    SQLModel.metadata.create_all(db_engine)
+    from core.utils import create_database_tables
+    create_database_tables()
 
     # Start the task manager
     task_manager.start(
@@ -63,9 +61,9 @@ if __name__ == "__main__":
     )
 
     # Schedule a task to set up the LLM server
-    from core.tasks import set_up_llm_service
+    from core.tasks import download_models
     task_manager.add_task(
-        task=set_up_llm_service
+        task=download_models
     )
 
     # Register signal handlers

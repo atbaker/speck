@@ -1,9 +1,11 @@
 import json
+import logging
 import os
 from typing import List, Optional
-from pydantic import BaseModel, ValidationError
+
 import httpx
-import logging
+from pydantic import BaseModel, ValidationError
+from sqlmodel import SQLModel, Session, text
 
 from config import template_env
 
@@ -13,7 +15,22 @@ from .pydantic_models_to_gbnf_grammar import generate_gbnf_grammar_and_documenta
 logger = logging.getLogger(__name__)
 
 
-@use_inference_service
+@use_inference_service(model_type='embedding')
+def generate_llamafile_embedding(content: str):
+    """
+    Generate an embedding for a given string using LlamaFile.
+    """
+    data = {
+        'content': content
+    }
+    response = httpx.post("http://localhost:17726/embedding", json=data)
+
+    embedding = response.json()['embedding']
+
+    return embedding
+
+
+@use_inference_service()
 def evaluate_with_validation(
     prompt: str,
     grammar: str,
@@ -28,7 +45,9 @@ def evaluate_with_validation(
         "prompt": prompt,
         "cache_prompt": True,
         "grammar": grammar,
-        "temperature": 0.2,
+        "temperature": 0,
+        "repeat_penalty": 1.0,
+        "penalize_nl": False,
         "stream": True,
         "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
         # "stop": ["<|endoftext|>"], # Phi 3
@@ -180,3 +199,24 @@ def download_file(url, output_path, chunk_size=1024*1024):
                         logger.info(f"Downloaded {downloaded_size / (1024 * 1024):.2f} MB of {file_size / (1024 * 1024):.2f} MB")
 
             logger.info(f"Downloaded {output_path}")
+
+
+def create_database_tables():
+    """
+    Sets up the database using SQLModel and sqlite-vec.
+    """
+    # Create the vec_messages table first if it doesn't exist
+    from config import db_engine
+    with Session(db_engine) as session:
+        session.exec(
+            text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_message using vec0 (
+                    message_id TEXT PRIMARY KEY,
+                    body_embedding FLOAT[1024]
+                )
+                """)
+        )
+
+    # Create the database tables
+    from emails import models as email_models
+    SQLModel.metadata.create_all(db_engine)

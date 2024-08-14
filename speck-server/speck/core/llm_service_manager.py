@@ -29,14 +29,15 @@ class LLMServiceManager:
     def _write_state(self, state):
         cache.set('llm_service_state', state)
 
-    def start_llamafile_process(self):
-        # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3-8B-Instruct.Q4_0.gguf')
-        # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q6_K.gguf')
-        model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
-        # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q4_K_M.gguf')
-        # model_path = os.path.join(settings.models_dir, 'Phi-3-mini-4k-instruct-q4.gguf')
-        # model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q6_K.gguf')
-        # model_path = os.path.join(settings.models_dir, 'Mistral-Nemo-Instruct-2407-Q6_K.gguf')
+    def start_llamafile_process(self, model_type):
+        if model_type == 'embedding':
+            model_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
+            context_size = '512'
+        elif model_type == 'completion':
+            model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
+            context_size = '8192'
+        else:
+            raise ValueError(f"Invalid model type: {model_type}. Must be 'embedding' or 'completion'")
 
         self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
         self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
@@ -49,11 +50,9 @@ class LLMServiceManager:
             '17726',
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
-            '--no-warmup',
             '--no-mmap', # TODO: Figure out why Gemma 2 has weird behavior when using mmap
             '--ctx-size',
-            '8192', # 8k context window for Gemma 2
-            # '4096', # 4k context window for Phi 3
+            context_size,
             '--model',
             model_path
         ]
@@ -95,10 +94,10 @@ class LLMServiceManager:
             logger.error(f"Error starting model server: {e}")
             return None
 
-    def start_server(self):
+    def start_server(self, model_type='completion'):
         state = self._read_state()
         if not state["pid"] or not self._is_process_running(state["pid"]):
-            process = self.start_llamafile_process()
+            process = self.start_llamafile_process(model_type)
             if process:
                 state["pid"] = process.pid
                 state["usage_count"] = 1
@@ -187,18 +186,20 @@ class LLMServiceManager:
 
 llm_service_manager = LLMServiceManager()
 
-def use_inference_service(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        pid = llm_service_manager.start_server()
-        if not pid:
-            raise RuntimeError("Failed to start the inference service.")
-        
-        try:
-            result = func(*args, **kwargs)
-        finally:
-            threading.Timer(5, llm_service_manager.stop_server).start()
-        
-        return result
-    
-    return wrapper
+def use_inference_service(model_type='completion'):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            pid = llm_service_manager.start_server(model_type)
+            if not pid:
+                raise RuntimeError("Failed to start the inference service.")
+
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                threading.Timer(5, llm_service_manager.stop_server).start()
+
+            return result
+
+        return wrapper
+    return decorator
