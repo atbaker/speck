@@ -1,4 +1,5 @@
 <context>
+{% include "_general_context.txt" %}
 {% include "_message_details.txt" %}
 </context>
 

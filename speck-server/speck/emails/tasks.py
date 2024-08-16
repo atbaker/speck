@@ -1,3 +1,4 @@
+import logging
 import pendulum
 from sqlalchemy.exc import NoResultFound
 from sqlmodel import Session, select
@@ -7,6 +8,8 @@ from config import db_engine
 from library import speck_library
 
 from .models import Mailbox, Message, SelectedFunctionArgument
+
+logger = logging.getLogger(__name__)
 
 
 def sync_inbox():
@@ -22,12 +25,13 @@ def sync_inbox():
             return
 
     # If we last synced less than 30 seconds ago, skip this sync
-    if mailbox.last_synced_at and pendulum.now() - pendulum.instance(mailbox.last_synced_at) < pendulum.Duration(seconds=30):
+    if mailbox.last_synced_at and (pendulum.now('utc') - pendulum.instance(mailbox.last_synced_at)).in_seconds() < 30:
+        logger.info("Skipping inbox sync because it was last synced less than 30 seconds ago")
         return
 
     mailbox.sync_inbox()
 
-def process_new_message(message_id: int):
+def process_inbox_message(message_id: int):
     """
     Process a new message.
     """

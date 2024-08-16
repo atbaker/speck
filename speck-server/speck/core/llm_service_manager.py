@@ -23,7 +23,8 @@ class LLMServiceManager:
         state = cache.get('llm_service_state')
 
         if state is None:
-            return {"pid": None, "usage_count": 0}
+            return {"embedding": {"pid": None, "usage_count": 0},
+                    "completion": {"pid": None, "usage_count": 0}}
         return state
 
     def _write_state(self, state):
@@ -33,9 +34,11 @@ class LLMServiceManager:
         if model_type == 'embedding':
             model_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
             context_size = '512'
+            llamafile_port = '17727'
         elif model_type == 'completion':
             model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
             context_size = '8192'
+            llamafile_port = '17726'
         else:
             raise ValueError(f"Invalid model type: {model_type}. Must be 'embedding' or 'completion'")
 
@@ -47,7 +50,7 @@ class LLMServiceManager:
             '--server',
             '--nobrowser',
             '--port',
-            '17726',
+            llamafile_port,
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
             '--no-mmap', # TODO: Figure out why Gemma 2 has weird behavior when using mmap
@@ -75,7 +78,7 @@ class LLMServiceManager:
                 p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
             # Poll the /health endpoint until the server is ready
-            health_url = "http://127.0.0.1:17726/health"
+            health_url = f"http://127.0.0.1:{llamafile_port}/health"
             for _ in range(60):  # Retry for up to 60 seconds
                 try:
                     response = requests.get(health_url)
@@ -96,36 +99,38 @@ class LLMServiceManager:
 
     def start_server(self, model_type='completion'):
         state = self._read_state()
-        if not state["pid"] or not self._is_process_running(state["pid"]):
+        model_state = state[model_type]
+        if not model_state["pid"] or not self._is_process_running(model_state["pid"]):
             process = self.start_llamafile_process(model_type)
             if process:
-                state["pid"] = process.pid
-                state["usage_count"] = 1
+                model_state["pid"] = process.pid
+                model_state["usage_count"] = 1
                 self._write_state(state)
                 return process.pid
             else:
                 return None  # Return early if the server couldn't be started
 
-        state["usage_count"] += 1
+        model_state["usage_count"] += 1
         self._write_state(state)
-        return state["pid"]
+        return model_state["pid"]
 
-    def stop_server(self):
+    def stop_server(self, model_type='completion'):
         """Stop the server if it's not being used."""
         state = self._read_state()
-        state["usage_count"] -= 1
-        if state["usage_count"] <= 0 and state["pid"]:
+        model_state = state[model_type]
+        model_state["usage_count"] -= 1
+        if model_state["usage_count"] <= 0 and model_state["pid"]:
             try:
                 if platform.system() == "Windows":
-                    self._terminate_process_windows(state["pid"])
+                    self._terminate_process_windows(model_state["pid"])
                 else:
-                    os.kill(state["pid"], 15)  # Terminate the process
+                    os.kill(model_state["pid"], 15)  # Terminate the process
 
-                state["pid"] = None
-                state["usage_count"] = 0
-                logger.info("Llamafile server stopped.")
+                model_state["pid"] = None
+                model_state["usage_count"] = 0
+                logger.info(f"Llamafile {model_type} server stopped.")
             except ProcessLookupError:
-                logger.error("Tried to stop Llamafile server but process not found.")
+                logger.error(f"Tried to stop Llamafile {model_type} server but process not found.")
 
         try:
             self.stdout_log.close()
@@ -135,24 +140,25 @@ class LLMServiceManager:
 
         self._write_state(state)
 
-    def force_stop_server(self):
+    def force_stop_server(self, model_type='completion'):
         """Forcefully stop the server."""
         state = self._read_state()
-        if state["pid"]:
+        model_state = state[model_type]
+        if model_state["pid"]:
             try:
                 if platform.system() == "Windows":
-                    self._terminate_process_windows(state["pid"])
+                    self._terminate_process_windows(model_state["pid"])
                 else:
-                    os.kill(state["pid"], 15)  # Attempt to terminate the process gracefully
+                    os.kill(model_state["pid"], 15)  # Attempt to terminate the process gracefully
                     time.sleep(5)  # Wait for a few seconds to allow graceful termination
-                    if self._is_process_running(state["pid"]):
-                        os.kill(state["pid"], 9)  # Forcefully kill the process if still running
+                    if self._is_process_running(model_state["pid"]):
+                        os.kill(model_state["pid"], 9)  # Forcefully kill the process if still running
 
-                state["pid"] = None
-                state["usage_count"] = 0
-                logger.info("Llamafile server forcefully stopped.")
+                model_state["pid"] = None
+                model_state["usage_count"] = 0
+                logger.info(f"Llamafile {model_type} server forcefully stopped.")
             except ProcessLookupError:
-                logger.error("Tried to force stop Llamafile server but process not found.")
+                logger.error(f"Tried to force stop Llamafile {model_type} server but process not found.")
 
         try:
             self.stdout_log.close()
@@ -197,7 +203,7 @@ def use_inference_service(model_type='completion'):
             try:
                 result = func(*args, **kwargs)
             finally:
-                threading.Timer(5, llm_service_manager.stop_server).start()
+                threading.Timer(5, llm_service_manager.stop_server, args=[model_type]).start()
 
             return result
 

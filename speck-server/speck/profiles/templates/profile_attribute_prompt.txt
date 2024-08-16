@@ -1,6 +1,10 @@
 <context>
 {% include "_general_context.txt" %}
-{% include "_message_details.txt" %}
+<messages>
+{% for message in messages %}
+    {% include "_message_details.txt" %}
+{% endfor %}
+</messages>
 </context>
 
 <instructions>

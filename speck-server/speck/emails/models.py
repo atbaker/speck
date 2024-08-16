@@ -4,6 +4,7 @@ import enum
 import email
 import uuid
 import html2text
+import logging
 import pendulum
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.sqlite import JSON
@@ -20,6 +21,8 @@ from library import speck_library, FunctionResult
 
 from .utils import get_gmail_api_client
 
+logger = logging.getLogger(__name__)
+
 
 class Mailbox(SQLModel, table=True):
     id: int | None = SQLModelField(default=None, primary_key=True)
@@ -33,23 +36,39 @@ class Mailbox(SQLModel, table=True):
 
     created_at: datetime = SQLModelField(default_factory=datetime.now)
 
+    # profile: Optional["Profile"] = Relationship(back_populates="mailbox", sa_relationship_kwargs={"uselist": False})
+
     def sync_inbox(self, session=None):
         """
         Sync the Mailbox with the Gmail API.
 
-        - Fetch the list of emails currently in the user's inbox (limit to 25 for proof of concept)
+        - Fetch all emails currently in the user's inbox and the latest 1000 non-inbox emails
         - Create Message objects for new emails in the response
-        - Delete old Message objects for emails that are no longer in the inbox
+        - Delete old Message objects for emails that no longer meet the criteria
         """
         client = get_gmail_api_client()
 
-        # Get all the message ids for messages in the user's inbox
-        last_synced_at = pendulum.now()
+        # Initialize our message_ids set and last_synced_at
+        message_ids = set()
+        last_synced_at = pendulum.now('utc')
+
+        # First, get the message ids for messages in the user's inbox
         response = client.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=25).execute()
-        message_ids = [message['id'] for message in response['messages']]
+        message_ids.update([message['id'] for message in response['messages']])
+
+        # Next, fetch non-inbox messages until our message_ids set has 1000 items
+        next_page_token = None
+        while len(message_ids) < 500:  # TODO: Experiment with this number
+            response = client.users().messages().list(userId='me', pageToken=next_page_token).execute()
+            message_ids.update([message['id'] for message in response['messages']])
+            if 'nextPageToken' not in response:
+                break
+            next_page_token = response['nextPageToken']
+            logging.info(f"Fetched {len(message_ids)} messages so far, next page token: {next_page_token}")
 
         # Iterate over each message and fetch its details
-        new_message_ids = []
+        new_inbox_message_ids = []
+        new_non_inbox_message_ids = []
         with session or Session(db_engine) as session:
             for message_id in message_ids:
                 # If we have a Message record for this message_id, then we don't
@@ -63,12 +82,19 @@ class Mailbox(SQLModel, table=True):
                     )
                     message = session.exec(statement).one()
 
-                    # If the message is still missing a type or a summary, then
-                    # we need to process it
+                    # If the message still needs to be processed, schedule it
                     if not message.processed:
-                        from .tasks import process_new_message
+                        from .tasks import process_inbox_message
                         task_manager.add_task(
-                            task=process_new_message,
+                            task=process_inbox_message,
+                            message_id=message_id
+                        )
+
+                    # And if we haven't generated an embedding yet, schedule it
+                    if not message.embedding_generated:
+                        from .tasks import generate_embedding_for_message
+                        task_manager.add_task(
+                            task=generate_embedding_for_message,
                             message_id=message_id
                         )
 
@@ -80,6 +106,7 @@ class Mailbox(SQLModel, table=True):
                     )
 
                 # Get the raw data from Gmail for this message
+                logging.info(f"Fetching message {message_id} from Gmail")
                 response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
 
                 # Update the Mailbox's last_history_id
@@ -104,7 +131,7 @@ class Mailbox(SQLModel, table=True):
 
                 # Update the fields on the Message
                 message.thread_id = response['threadId']
-                message.label_ids = response['labelIds']
+                message.label_ids = response.get('labelIds', []) # It seems messages inserted in the user's inbox via the Gmail API don't have labelIds
                 message.from_ = email_message['From']
                 message.to = to_recipients
                 message.cc = cc_recipients
@@ -121,29 +148,61 @@ class Mailbox(SQLModel, table=True):
                     content = email_message.get_body(preferencelist=('html', 'text')).get_content()
                 except AttributeError:
                     # TODO If the message doesn't have a body, like a calendar invitation, just ignore it for now
+                    logging.info(f"Message {message_id} doesn't have a body, skipping")
                     continue
 
                 message.body = text_maker.handle(content)
 
                 session.add(message)
-                new_message_ids.append(message_id)
+
+                # Append the message to the appropriate list
+                if message.in_inbox:
+                    new_inbox_message_ids.append(message_id)
+                else:
+                    new_non_inbox_message_ids.append(message_id)
+
+            # Delete old Message objects for emails that are no longer in our set
+            session.exec(delete(Message).where(Message.id.not_in(message_ids)))
 
             # Update the Mailbox's last_synced_at
             self.last_synced_at = last_synced_at
             session.add(self)
 
-            # Delete old Message objects for emails that are no longer in the inbox
-            session.exec(delete(Message).where(Message.id.not_in(message_ids)))
+            # Commit the changes
+            session.commit()
 
-            # Generate summaries for new messages
-            for message_id in new_message_ids:
-                from .tasks import process_new_message
+            # Schedule tasks to process the new inbox messages and generate embeddings
+            # for all messages. It helps to schedule the tasks in this order so the
+            # Llamafile service manager doesn't have to switch back and forth between
+            # generating completions and generating embeddings.
+            for message_id in new_inbox_message_ids:
+                from .tasks import process_inbox_message
                 task_manager.add_task(
-                    task=process_new_message,
+                    task=process_inbox_message,
+                    message_id=message_id
+                )
+            for message_id in new_inbox_message_ids + new_non_inbox_message_ids:
+                from .tasks import generate_embedding_for_message
+                task_manager.add_task(
+                    task=generate_embedding_for_message,
                     message_id=message_id
                 )
 
-            session.commit()
+            # Also schedule a task to update the Profile if it's not complete
+            from profiles.models import Profile
+            profile = session.exec(select(Profile)).one() # TODO: Multiple profiles
+            if not profile.complete:
+                from profiles.tasks import update_profile
+                task_manager.add_task(
+                    task=update_profile
+                )
+
+    def get_general_context(self):
+        """Get the general context of the message."""
+        return {
+            'current_utc_datetime': str(pendulum.now('utc')),
+            'user_email_address': self.email_address,
+        }
 
     def get_messages(self):
         """Get all the messages in the mailbox."""
@@ -162,6 +221,28 @@ class Mailbox(SQLModel, table=True):
                 'executed_functions': message.executed_functions,
             }
         return mailbox_data
+
+    def search_embeddings(self, query: str):
+        """Search the mailbox's embeddings for a query."""
+        # Generate an embedding for the query
+        query_embedding = generate_llamafile_embedding(query)
+        serialized_query_embedding = serialize_float32(query_embedding)
+
+        # Run the query against the VecMessage table to find the 10 most similar messages
+        with Session(db_engine) as session:
+            results = session.exec(text(
+                'select * from vec_message where body_embedding match :query_embedding and k = 10'
+            ).bindparams(
+                query_embedding=serialized_query_embedding
+            )).all()
+
+            # Get the message_ids from the results
+            message_ids = [message_id for message_id, embedding in results]
+
+            # Get the messages from the Message table
+            messages = session.exec(select(Message).where(Message.id.in_(message_ids))).all()
+
+        return messages
 
     def insert_message(self):
         """Insert a message into the user's inbox."""
@@ -183,39 +264,8 @@ class Mailbox(SQLModel, table=True):
             body=message
         ).execute()
 
-        print(f"Inserted message with ID: {response['id']}")
+        logging.info(f"Inserted message with ID: {response['id']}")
 
-
-class ActionNecessity(str, enum.Enum):
-    NONE = 'None'
-    OPTIONAL = 'Optional'
-    RECOMMENDED = 'Recommended'
-    REQUIRED = 'Required'
-
-ACTION_NECESSITY_DESCRIPTIONS = {
-    ActionNecessity.NONE: "No action needed.",
-    ActionNecessity.OPTIONAL: "Action is not necessary, but the user may choose to take action based on their current needs and the contents of the email.",
-    ActionNecessity.RECOMMENDED: "Action not necessary, but taking no action may result in negative consequences.",
-    ActionNecessity.REQUIRED: "At least one action is required to avoid negative consequences."
-}
-
-class ActionUrgency(str, enum.Enum):
-    IMMEDIATE = 'Immediate'
-    HIGH = 'High'
-    MEDIUM = 'Medium'
-    LOW = 'Low'
-
-ACTION_URGENCY_DESCRIPTIONS = {
-    ActionUrgency.IMMEDIATE: "Action needed ASAP to avoid negative consequences.",
-    ActionUrgency.HIGH: "Action needed within 24 hours to avoid negative consequences.",
-    ActionUrgency.MEDIUM: "Action needed within a week to avoid negative consequences.",
-    ActionUrgency.LOW: "Action needed, but not urgently and may not have any time constraints at all.",
-}
-
-class MessageAction(BaseModel):
-    action: str
-    necessity: ActionNecessity
-    urgency: ActionUrgency
 
 class MessageType(str, enum.Enum):
     CORRESPONDENCE = 'Correspondence'
@@ -295,7 +345,7 @@ class Message(SQLModel, table=True):
     id: str | None = SQLModelField(default=None, primary_key=True)
 
     mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
-    mailbox: Mailbox = Relationship(back_populates='messages')
+    mailbox: "Mailbox" = Relationship(back_populates='messages')
 
     raw: str
 
@@ -311,10 +361,9 @@ class Message(SQLModel, table=True):
     body: str
 
     message_type: MessageType | None = SQLModelField(default=None, sa_column=Column(Enum(MessageType)))
-    actions: List[MessageAction] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    action_necessary: ActionNecessity | None = SQLModelField(default=None, sa_column=Column(Enum(ActionNecessity)))
-    action_urgency: ActionUrgency | None = SQLModelField(default=None, sa_column=Column(Enum(ActionUrgency)))
     summary: str | None = None
+
+    embedding_generated: bool = SQLModelField(default=False)
 
     functions_analyzed: bool = SQLModelField(default=False)
     selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
@@ -323,23 +372,30 @@ class Message(SQLModel, table=True):
     created_at: datetime = SQLModelField(default_factory=datetime.now)
 
     @property
+    def in_inbox(self):
+        """Returns True if the message is in the user's inbox."""
+        return 'INBOX' in self.label_ids
+
+    @property
     def processed(self):
+        """
+        Returns True if the message has been processed, according to the criteria below:
+
+        If the message is not in the user's inbox, then it needs no processing.
+
+        Otherwise, the message needs to have a type, summary, and functions
+        analyzed.
+        """
+        if not self.in_inbox:
+            return True
+
         return self.message_type is not None and self.summary is not None and self.functions_analyzed
 
     def analyze_and_process(self):
         """Analyze a new message and process it."""
-        self.generate_embedding()
-        # self.set_type()
-        # self.generate_summary()
-        # self.analyze_actions_and_urgency()
-        # self.select_functions()
-
-    def get_general_context(self):
-        """Get the general context of the message."""
-        return {
-            'current_datetime': str(pendulum.now()),
-            'user_email_address': self.mailbox.email_address,
-        }
+        self.set_type()
+        self.generate_summary()
+        self.select_functions()
 
     def set_type(self):
         """Categorize the message based on its contents."""
@@ -352,6 +408,7 @@ class Message(SQLModel, table=True):
 
         prompt = template_env.get_template('message_type_prompt.txt').render(
             message=self,
+            general_context=self.mailbox.get_general_context(),
             instructions='Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
             message_type_descriptions=MESSAGE_TYPE_DESCRIPTIONS
         )
@@ -374,6 +431,7 @@ class Message(SQLModel, table=True):
 
         prompt = template_env.get_template('message_summary_prompt.txt').render(
             message=self,
+            general_context=self.mailbox.get_general_context(),
             instructions='Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.',
         )
         result = run_llamafile_completion(
@@ -382,67 +440,6 @@ class Message(SQLModel, table=True):
         )
 
         self.summary = result.summary
-
-    def analyze_actions_and_urgency(self):
-        """
-        Analyze the message, determine if any actions are required, and
-        determine the urgency of any actions identified.
-        """
-        # TODO: Disabling for now
-        self.action_necessary = ActionNecessity.NONE
-        self.action_urgency = None
-        self.actions = []
-        return
-
-        # If we already have an action_necessary value, do nothing
-        if self.action_necessary is not None:
-            return
-
-        class AnalyzeRequiredActions(BaseModel):
-            actions: List[MessageAction] = Field(default_factory=list)
-
-        prompt = template_env.get_template('analyze_actions_and_urgency_prompt.txt').render(
-            message=self,
-            instructions='Based on the contents of the email, determine if any action is required from the user, erring on the side of minimal or no action. If action is required, identify the minimum specific task for the user and add each one to the "actions" array. For each action entry, include a "necessity" field and an "urgency" field, using the values provided.',
-            action_necessity_descriptions=ACTION_NECESSITY_DESCRIPTIONS,
-            action_urgency_descriptions=ACTION_URGENCY_DESCRIPTIONS
-        )
-        result = run_llamafile_completion(
-            prompt=prompt,
-            model=AnalyzeRequiredActions
-        )
-
-        # If no actions are found, set action_necessary to NONE and action_urgency to None
-        if not result.actions:
-            self.actions = []
-            self.action_necessary = ActionNecessity.NONE
-            self.action_urgency = None
-            return
-
-        # Define priority order for ActionNecessity and ActionUrgency
-        necessity_priority = {
-            ActionNecessity.NONE: 0,
-            ActionNecessity.OPTIONAL: 1,
-            ActionNecessity.RECOMMENDED: 2,
-            ActionNecessity.REQUIRED: 3
-        }
-        urgency_priority = {
-            ActionUrgency.LOW: 0,
-            ActionUrgency.MEDIUM: 1,
-            ActionUrgency.HIGH: 2,
-            ActionUrgency.IMMEDIATE: 3
-        }
-
-        # Find the most necessary action, breaking ties with urgency
-        most_necessary_action = max(
-            result.actions,
-            key=lambda action: (necessity_priority[action.necessity], urgency_priority[action.urgency])
-        )
-
-        # Set the action_necessary and action_urgency based on the most necessary action
-        self.action_necessary = most_necessary_action.necessity
-        self.action_urgency = most_necessary_action.urgency
-        self.actions = [action.model_dump_json() for action in result.actions]
 
     def select_functions(self):
         """
@@ -458,6 +455,7 @@ class Message(SQLModel, table=True):
 
         prompt = template_env.get_template('select_functions_prompt.txt').render(
             message=self,
+            general_context=self.mailbox.get_general_context(),
             instructions="Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
             speck_library=speck_library
         )
@@ -504,10 +502,10 @@ class Message(SQLModel, table=True):
         # Check if we already have an embedding
         with Session(db_engine) as session:
             try:
-                vec_message = session.exec(select(VecMessage).where(VecMessage.message_id == self.id)).one()
+                session.exec(select(VecMessage).where(VecMessage.message_id == self.id)).one()
 
-                # If we do, return it
-                return vec_message
+                # If we do, return
+                return
             except NoResultFound:
                 # If we don't, generate it
                 pass
@@ -516,15 +514,19 @@ class Message(SQLModel, table=True):
         embedding = generate_llamafile_embedding(self.body)
 
         # Convert the result to a BLOB
-        embedding_blob = bytes(serialize_float32(embedding))
+        embedding_blob = serialize_float32(embedding)
 
-        # Save it as a new VecMessage object
+        # Save it as a new VecMessage object and set the embedding_generated flag
         with Session(db_engine) as session:
             vec_message = VecMessage(
                 message_id=self.id,
                 body_embedding=embedding_blob
             )
             session.add(vec_message)
+
+            self.embedding_generated = True
+            session.add(self)
+
             session.commit()
 
 class VecMessage(SQLModel, table=True):

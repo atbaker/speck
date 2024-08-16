@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     # Task manager
     task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else ''
+    recurring_tasks: list[tuple[str, int, tuple, dict]] = [
+        ('emails.tasks.sync_inbox', 60, (), {})  # (task, interval in seconds, args, kwargs)
+    ]
 
     # Playwright
     playwright_browsers_dir: str = os.path.join(speck_data_dir, 'browsers')
@@ -82,6 +85,7 @@ template_env = Environment(
     loader=ChoiceLoader([
         FileSystemLoader(os.path.join(BASE_DIR, 'core', 'templates')),
         FileSystemLoader(os.path.join(BASE_DIR, 'emails', 'templates')),
+        FileSystemLoader(os.path.join(BASE_DIR, 'profiles', 'templates')),
     ]),
     autoescape=select_autoescape(),
 )

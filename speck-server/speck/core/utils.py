@@ -5,9 +5,10 @@ from typing import List, Optional
 
 import httpx
 from pydantic import BaseModel, ValidationError
-from sqlmodel import SQLModel, Session, text
+from sqlite_vec import serialize_float32
+from sqlmodel import SQLModel, Session, select, text
 
-from config import template_env
+from config import db_engine, template_env
 
 from .llm_service_manager import use_inference_service
 from .pydantic_models_to_gbnf_grammar import generate_gbnf_grammar_and_documentation
@@ -18,12 +19,12 @@ logger = logging.getLogger(__name__)
 @use_inference_service(model_type='embedding')
 def generate_llamafile_embedding(content: str):
     """
-    Generate an embedding for a given string using LlamaFile.
+    Generate a serialized binary embedding for a given string using LlamaFile.
     """
     data = {
         'content': content
     }
-    response = httpx.post("http://localhost:17726/embedding", json=data)
+    response = httpx.post("http://localhost:17727/embedding", json=data)
 
     embedding = response.json()['embedding']
 
@@ -206,7 +207,6 @@ def create_database_tables():
     Sets up the database using SQLModel and sqlite-vec.
     """
     # Create the vec_messages table first if it doesn't exist
-    from config import db_engine
     with Session(db_engine) as session:
         session.exec(
             text("""
@@ -219,4 +219,24 @@ def create_database_tables():
 
     # Create the database tables
     from emails import models as email_models
+    from profiles import models as profile_models
     SQLModel.metadata.create_all(db_engine)
+
+def reset_database():
+    """
+    Resets the Speck database. Used during local development.
+    """
+    # Delete all Message and VecMessage rows
+    from emails.models import Message, VecMessage
+    with Session(db_engine) as session:
+        statement = select(Message)
+        messages = session.exec(statement).all()
+        for message in messages:
+            session.delete(message)
+
+        statement = select(VecMessage)
+        vec_messages = session.exec(statement).all()
+        for vec_message in vec_messages:
+            session.delete(vec_message)
+
+        session.commit()

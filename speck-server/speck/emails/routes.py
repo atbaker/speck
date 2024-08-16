@@ -13,8 +13,9 @@ from sqlmodel import select, Session
 
 from config import settings, get_db_session
 from core.task_manager import task_manager
+from profiles.models import Profile
 
-from .models import Mailbox, Message
+from .models import Mailbox
 from .utils import get_gmail_api_client
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
     # And remove our code_verifier
     keyring.delete_password(settings.app_name, 'google_oauth_code_verifier')
 
-    # Finally, fetch the user's profile info and get or create their Mailbox
+    # Finally, fetch the user's profile info and get or create their Mailbox and Profile
     client = get_gmail_api_client()
     user_profile = client.users().getProfile(userId='me').execute()
     email_address = user_profile['emailAddress']
@@ -92,10 +93,15 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
     except NoResultFound:
         mailbox = Mailbox(email_address=email_address)
         session.add(mailbox)
+        session.commit() # Commit first to get the mailbox id
+
+        profile = Profile(mailbox_id=mailbox.id)
+        session.add(profile)
         session.commit()
 
     # Kick off an initial sync of the mailbox
-    task_manager.add_task(mailbox.sync_inbox)
+    from .tasks import sync_inbox
+    task_manager.add_task(task=sync_inbox)
 
     return {"status": "success"}
 

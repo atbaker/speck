@@ -63,7 +63,9 @@ def scheduler(task_queue, stop_event, log_queue, recurring_tasks):
     configure_worker_logging(log_queue)
     logger = logging.getLogger(f'scheduler-{threading.current_thread().name}')
 
-    next_run_times = {task: time.time() for task, interval, args, kwargs in recurring_tasks}
+    # Schedule the initial next run times with an offset of 5 seconds to allow
+    # the setup tasks to get in the queue first
+    next_run_times = {task: time.time() + 5 for task, interval, args, kwargs in recurring_tasks}
 
     while not stop_event.is_set():
         current_time = time.time()
@@ -192,9 +194,9 @@ class TaskManager:
                 task_name = self.parent_conn.recv()
 
                 # Use the event system to push a Mailbox state update after
-                # completing a process_new_message task or a execute_function_for_message
+                # completing a process_inbox_message task or a execute_function_for_message
                 # task
-                if task_name in ("process_new_message", "execute_function_for_message"):
+                if task_name in ("process_inbox_message", "execute_function_for_message"):
                     self.logger.info('Pushing mailbox state to event system')
                     # TODO: Should probably make this a Mailbox class method
                     from emails.models import Mailbox

@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, List, Optional, get_type_hints, Callable, Dict
+import pendulum
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -29,7 +30,7 @@ class FunctionResult(BaseModel):
     success: bool
     success_message: Optional[str] = None
     error_message: Optional[str] = None
-    executed_at: datetime = Field(default_factory=lambda: datetime.now())
+    executed_at: datetime = Field(default_factory=lambda: pendulum.now('utc'))
 
 
 class SpeckLibrary(BaseModel):
