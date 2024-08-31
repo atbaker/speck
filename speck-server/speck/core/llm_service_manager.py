@@ -34,11 +34,11 @@ class LLMServiceManager:
         if model_type == 'embedding':
             model_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
             context_size = '512'
-            llamafile_port = '17727'
+            llamafile_port = '17726'
         elif model_type == 'completion':
             model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
             context_size = '8192'
-            llamafile_port = '17726'
+            llamafile_port = '17727'
         else:
             raise ValueError(f"Invalid model type: {model_type}. Must be 'embedding' or 'completion'")
 
@@ -53,7 +53,7 @@ class LLMServiceManager:
             llamafile_port,
             '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
             '9999',
-            '--no-mmap', # TODO: Figure out why Gemma 2 has weird behavior when using mmap
+            '--no-mmap',
             '--ctx-size',
             context_size,
             '--model',
@@ -90,14 +90,14 @@ class LLMServiceManager:
 
             # If the server did not become ready in time, kill the process
             process.terminate()
-            logger.error("Error: Model server did not become ready in time.")
+            logger.error("Error: Llamafile server did not become ready in time.")
             return None
 
         except Exception as e:
-            logger.error(f"Error starting model server: {e}")
+            logger.error(f"Error starting Llamafile server: {e}")
             return None
 
-    def start_server(self, model_type='completion'):
+    def start_server(self, model_type='embedding'):
         state = self._read_state()
         model_state = state[model_type]
         if not model_state["pid"] or not self._is_process_running(model_state["pid"]):
@@ -114,7 +114,7 @@ class LLMServiceManager:
         self._write_state(state)
         return model_state["pid"]
 
-    def stop_server(self, model_type='completion'):
+    def stop_server(self, model_type='embedding'):
         """Stop the server if it's not being used."""
         state = self._read_state()
         model_state = state[model_type]
@@ -140,7 +140,7 @@ class LLMServiceManager:
 
         self._write_state(state)
 
-    def force_stop_server(self, model_type='completion'):
+    def force_stop_server(self, model_type='embedding'):
         """Forcefully stop the server."""
         state = self._read_state()
         model_state = state[model_type]
@@ -192,7 +192,7 @@ class LLMServiceManager:
 
 llm_service_manager = LLMServiceManager()
 
-def use_inference_service(model_type='completion'):
+def use_inference_service(model_type='embedding'):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -203,6 +203,8 @@ def use_inference_service(model_type='completion'):
             try:
                 result = func(*args, **kwargs)
             finally:
+                # Keep the server running for 5 seconds after the function call is finished,
+                # in case another task is about to start using it
                 threading.Timer(5, llm_service_manager.stop_server, args=[model_type]).start()
 
             return result

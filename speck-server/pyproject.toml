@@ -10,6 +10,7 @@ package-mode = false
 python = ">=3.12,<3.13"
 click = "^8.1.7"
 fastapi = "^0.111.1"
+fireworks-ai = "^0.15.0"
 google-api-python-client = "^2.137.0"
 google-auth = "^2.32.0"
 html2text = "^2024.2.26"

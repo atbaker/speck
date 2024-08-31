@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import SQLModel, Field as SQLModelField, Relationship, Column, JSON, Session, select
 
 from config import db_engine, template_env
-from core.utils import run_llamafile_completion
+from core.utils import generate_completion
 from emails.models import Message
 
 
@@ -71,7 +71,7 @@ class Profile(SQLModel, table=True):
             instructions="Based on the user's email address and the the contents of these 20 recent email messages from the user's inbox, determine the user's full name.",
         )
 
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=FullName
         )
@@ -98,7 +98,7 @@ class Profile(SQLModel, table=True):
             instructions="Based on the contents of these 10 recent order confirmation messages from the user's inbox, determine the user's primary physical address. Example output: '123 Main St, Anytown, CA 12345'.",
         )
 
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=PrimaryAddress
         )
@@ -126,7 +126,7 @@ class Profile(SQLModel, table=True):
             instructions="Based on the contents of these 10 recent banking messages from the user's inbox, determine the list of financial institutions the user has accounts with. Include each institution only once. Do not include credit bureaus like TransUnion, Equifax, or Experian. Example output: [\"Bank of America\", \"Chase\", \"Wells Fargo\"].",
         )
 
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=FinancialInstitutions
         )

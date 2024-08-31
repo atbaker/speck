@@ -42,13 +42,16 @@ class Settings(BaseSettings):
     os.makedirs(playwright_browsers_dir, exist_ok=True)
     os.environ['PLAYWRIGHT_BROWSERS_PATH'] = playwright_browsers_dir
 
-    # LLM server
+    # Model server
     models_dir: str = os.path.join(speck_data_dir, 'models')
 
     llamafile_exe_path: str = os.path.join(BASE_DIR, 'llamafile')
     # Append a ".exe" extension if on Windows
     if os_name == 'Windows':
         llamafile_exe_path += '.exe'
+
+    # Cloud vs. local completion
+    use_local_completions: bool = False
 
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'

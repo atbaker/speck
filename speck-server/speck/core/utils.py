@@ -3,12 +3,13 @@ import logging
 import os
 from typing import List, Optional
 
+from fireworks.client import Fireworks
 import httpx
 from pydantic import BaseModel, ValidationError
 from sqlite_vec import serialize_float32
 from sqlmodel import SQLModel, Session, select, text
 
-from config import db_engine, template_env
+from config import db_engine, settings, template_env
 
 from .llm_service_manager import use_inference_service
 from .pydantic_models_to_gbnf_grammar import generate_gbnf_grammar_and_documentation
@@ -17,22 +18,60 @@ logger = logging.getLogger(__name__)
 
 
 @use_inference_service(model_type='embedding')
-def generate_llamafile_embedding(content: str):
+def generate_embedding(content: str):
     """
-    Generate a serialized binary embedding for a given string using LlamaFile.
+    Generate a serialized binary embedding for a given string using Llamafile.
     """
     data = {
         'content': content
     }
-    response = httpx.post("http://localhost:17727/embedding", json=data)
+    response = httpx.post("http://localhost:17726/embedding", json=data)
 
     embedding = response.json()['embedding']
 
     return embedding
 
 
-@use_inference_service()
-def evaluate_with_validation(
+def generate_completion_with_validation(
+    prompt: str,
+    return_model: BaseModel,
+    max_retries: int = 3
+) -> BaseModel:
+    """
+    Uses Fireworks to evaluate a prompt and return a Pydantic model.
+    """
+    fireworks = Fireworks() # TODO: Need to set FIREWORKS_API_KEY as an environment variable for now
+    response = fireworks.completions.create(
+        model="accounts/fireworks/models/llama-v3p1-70b-instruct",
+        prompt=prompt,
+        max_tokens=1024,
+        temperature=0.2,
+        response_format={ "type": "json_object", "schema": return_model.model_json_schema() },
+    )
+
+    try:
+        response_text = response.choices[0].text
+        result = return_model.model_validate_json(response_text)
+    except ValidationError as e:
+        # If we've exhausted all our retries, just re-raise the exception
+        if max_retries <= 0:
+            raise
+
+        # If we hit validation errors, append the invalid output and error
+        # message(s) to the prompt and try again
+        logger.error(f"LLM response was invalid: {response_text} {e}")
+        prompt += f"\n\nYour output was invalid. Here is what you provided: {response_text}\n\nHere is the error message: {e}\n\nTry again to create a valid {return_model.__name__} object."
+        return generate_completion_with_validation(
+            prompt,
+            return_model,
+            max_retries - 1
+        )
+
+    return result
+
+
+@use_inference_service(model_type='completion')
+def generate_local_completion_with_validation(
     prompt: str,
     grammar: str,
     return_model: BaseModel,
@@ -61,7 +100,7 @@ def evaluate_with_validation(
     max_whitespace_char_count = 5
 
     try:
-        with httpx.stream('POST', "http://localhost:17726/completion", json=data, timeout=180) as response:
+        with httpx.stream('POST', "http://localhost:17727/completion", json=data, timeout=180) as response:
             for text in response.iter_text():
                 try:
                     data = json.loads(
@@ -97,7 +136,7 @@ def evaluate_with_validation(
         # Otherwise, tell the LLM it got stuck and give it a chance to try again
         logger.error(f"LLM generated too much whitespace: {content}")
         prompt += f"\n\nYour previous attempt to respond to this prompt failed because you generated too much whitespace. Here is what you provided: {content}\n\nTry again to create a valid {return_model.__name__} object."
-        return evaluate_with_validation(
+        return generate_local_completion_with_validation(
             prompt,
             grammar,
             return_model,
@@ -116,7 +155,7 @@ def evaluate_with_validation(
         # message(s) to the prompt and try again
         logger.error(f"LLM response was invalid: {content} {e}")
         prompt += f"\n\nYour output was invalid. Here is what you provided: {content}\n\nHere is the error message: {e}\n\nTry again to create a valid {return_model.__name__} object."
-        return evaluate_with_validation(
+        return generate_local_completion_with_validation(
             prompt,
             grammar,
             return_model,
@@ -126,14 +165,13 @@ def evaluate_with_validation(
     return result
 
 
-def run_llamafile_completion(
+def generate_completion(
     prompt: str,
     return_model: BaseModel,
-    nested_models: Optional[List[BaseModel]] = None,
-    system_prompt: str = 'You write concise summaries of emails.'
+    nested_models: Optional[List[BaseModel]] = None
 ) -> BaseModel:
     """
-    Uses LlamaFile to run a completion for a given model and message.
+    Generate a completion for a given model and message.
     """
     # Generate the GBNF grammar and documentation
     grammar, documentation = generate_gbnf_grammar_and_documentation(
@@ -152,12 +190,17 @@ def run_llamafile_completion(
     {response_format}
     """
 
-    # Make the request to the Llamafile server
-    result = evaluate_with_validation(
-        prompt_with_schema,
-        grammar,
-        return_model
-    )
+    if settings.use_local_completions:
+        result = generate_local_completion_with_validation(
+            prompt_with_schema,
+            grammar,
+            return_model
+        )
+    else:
+        result = generate_completion_with_validation(
+            prompt_with_schema,
+            return_model
+        )
 
     # Return the content
     return result

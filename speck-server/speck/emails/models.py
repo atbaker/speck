@@ -15,7 +15,7 @@ from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Re
 from typing import List, Literal, Optional
 
 from config import db_engine, template_env
-from core.utils import run_llamafile_completion, generate_llamafile_embedding
+from core.utils import generate_completion, generate_embedding
 from core.task_manager import task_manager
 from library import speck_library, FunctionResult
 
@@ -225,7 +225,7 @@ class Mailbox(SQLModel, table=True):
     def search_embeddings(self, query: str):
         """Search the mailbox's embeddings for a query."""
         # Generate an embedding for the query
-        query_embedding = generate_llamafile_embedding(query)
+        query_embedding = generate_embedding(query)
         serialized_query_embedding = serialize_float32(query_embedding)
 
         # Run the query against the VecMessage table to find the 10 most similar messages
@@ -412,7 +412,7 @@ class Message(SQLModel, table=True):
             instructions='Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
             message_type_descriptions=MESSAGE_TYPE_DESCRIPTIONS
         )
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=CategorizeMessageType,
             nested_models=[MessageType]
@@ -434,7 +434,7 @@ class Message(SQLModel, table=True):
             general_context=self.mailbox.get_general_context(),
             instructions='Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.',
         )
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=MessageSummary
         )
@@ -459,7 +459,7 @@ class Message(SQLModel, table=True):
             instructions="Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
             speck_library=speck_library
         )
-        result = run_llamafile_completion(
+        result = generate_completion(
             prompt=prompt,
             return_model=SelectedFunctions,
             nested_models=[SelectedFunction, SelectedFunctionArgument]
@@ -511,7 +511,7 @@ class Message(SQLModel, table=True):
                 pass
 
         # Generate the embedding
-        embedding = generate_llamafile_embedding(self.body)
+        embedding = generate_embedding(self.body)
 
         # Convert the result to a BLOB
         embedding_blob = serialize_float32(embedding)
