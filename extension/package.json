@@ -3,15 +3,18 @@
   "version": "1.0.0",
   "main": "background.js",
   "scripts": {
-    "build:chrome": "cp manifest.chrome.json manifest.json",
-    "build:firefox": "cp manifest.firefox.json manifest.json",
+    "build:css": "npx postcss src/styles/tailwind.css -o src/styles/tailwind.build.css",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
-  "dependencies": {
-    "webextension-polyfill": "^0.12.0"
+  "devDependencies": {
+    "@alpinejs/csp": "^3.14.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.42",
+    "postcss-cli": "^11.0.0",
+    "tailwindcss": "^3.4.10"
   }
 }

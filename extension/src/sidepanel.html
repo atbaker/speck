@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Speck Side Panel</title>
+    <link rel="stylesheet" type="text/css" href="styles/tailwind.build.css">
+    <script src="../node_modules/@alpinejs/csp/dist/cdn.min.js" defer></script>
+</head>
+<body class="p-4 bg-gradient-to-r from-blue-50 to-blue-200">
+    <div x-data="$store.threadStore" id="speck-div" class="p-4 rounded-lg shadow-md">
+        <strong class="text-lg mb-2" x-text="threadId"></strong>
+        <p class="mt-2" x-text="summary"></p>
+    </div>
+    <script src="sidepanel.js" nonce="a23gbfz9e"></script>
+</body>
+</html>
