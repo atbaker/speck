@@ -394,7 +394,7 @@ class Message(SQLModel, table=True):
     def analyze_and_process(self):
         """Analyze a new message and process it."""
         self.set_type()
-        self.generate_summary()
+        self.generate_summary_with_langchain()
         self.select_functions()
 
     def set_type(self):
@@ -419,6 +419,42 @@ class Message(SQLModel, table=True):
         )
 
         self.message_type = result.type
+
+    def generate_summary_with_langchain(self):
+        """Test implementation of generate_summary using the Langchain library."""
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.messages import HumanMessage
+        from langchain_fireworks import ChatFireworks
+
+        summary_prompt = ChatPromptTemplate.from_template(
+            template='''
+            <context>
+            {message_details}
+            </context>
+
+            <instructions>
+            Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.
+            </instructions>
+            '''
+        )
+
+        class MessageSummary(BaseModel):
+            summary: str = Field(max_length=80)
+
+        # Initialize the ChatFireworks model
+        llm = ChatFireworks(model="accounts/fireworks/models/llama-v3p1-70b-instruct", temperature=0).with_structured_output(MessageSummary)
+
+        chain = summary_prompt | llm
+
+        message_details = template_env.get_template('_message_details.txt').render(
+            message=self
+        )
+
+        result = chain.invoke({
+            'message_details': message_details
+        })
+
+        self.summary = result.summary
 
     def generate_summary(self):
         """Generate and store a short summary of the message."""
