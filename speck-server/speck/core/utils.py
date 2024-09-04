@@ -1,18 +1,17 @@
-import json
 import logging
 import os
-from typing import List, Optional
+from typing import Dict
 
-from fireworks.client import Fireworks
 import httpx
-from pydantic import BaseModel, ValidationError
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_fireworks import ChatFireworks
+from pydantic import BaseModel
 from sqlite_vec import serialize_float32
 from sqlmodel import SQLModel, Session, select, text
 
-from config import db_engine, settings, template_env
+from config import db_engine, settings
 
 from .llm_service_manager import use_inference_service
-from .pydantic_models_to_gbnf_grammar import generate_gbnf_grammar_and_documentation
 
 logger = logging.getLogger(__name__)
 
@@ -33,178 +32,58 @@ def generate_embedding(content: str):
 
 
 def generate_completion_with_validation(
-    prompt: str,
-    return_model: BaseModel,
-    max_retries: int = 3
-) -> BaseModel:
+        prompt_template: str,
+        partial_variables: Dict,
+        input_variables: Dict,
+        output_model: BaseModel,
+        llm_temperature: float = 0.2,
+        max_retries: int = 3
+):
     """
-    Uses Fireworks to evaluate a prompt and return a Pydantic model.
+    Uses LangChain and Fireworks to evaluate a prompt and return a Pydantic
+    model.
     """
-    fireworks = Fireworks() # TODO: Need to set FIREWORKS_API_KEY as an environment variable for now
-    response = fireworks.completions.create(
-        model="accounts/fireworks/models/llama-v3p1-70b-instruct",
-        prompt=prompt,
-        max_tokens=1024,
-        temperature=0.2,
-        response_format={ "type": "json_object", "schema": return_model.model_json_schema() },
+    prompt = ChatPromptTemplate.from_template(
+        template=prompt_template,
+        template_format='jinja2',
+        partial_variables=partial_variables
     )
 
-    try:
-        response_text = response.choices[0].text
-        result = return_model.model_validate_json(response_text)
-    except ValidationError as e:
-        # If we've exhausted all our retries, just re-raise the exception
-        if max_retries <= 0:
-            raise
+    llm = ChatFireworks(
+        model=settings.fireworks_default_model,
+        temperature=llm_temperature
+    ).with_structured_output(output_model, include_raw=True)
 
-        # If we hit validation errors, append the invalid output and error
-        # message(s) to the prompt and try again
-        logger.error(f"LLM response was invalid: {response_text} {e}")
-        prompt += f"\n\nYour output was invalid. Here is what you provided: {response_text}\n\nHere is the error message: {e}\n\nTry again to create a valid {return_model.__name__} object."
-        return generate_completion_with_validation(
-            prompt,
-            return_model,
-            max_retries - 1
-        )
+    chain = prompt | llm
 
-    return result
+    result = chain.invoke(input=input_variables)
 
+    # If we got a parsed result on the first try, return it
+    if result['parsed']:
+        return result['parsed']
 
-@use_inference_service(model_type='completion')
-def generate_local_completion_with_validation(
-    prompt: str,
-    grammar: str,
-    return_model: BaseModel,
-    max_retries: int = 3
-) -> BaseModel:
-    """
-    Makes a request to the Llamafile server and tries up to three times to get
-    a valid response.
-    """
-    data = {
-        "prompt": prompt,
-        "cache_prompt": True,
-        "grammar": grammar,
-        "temperature": 0,
-        "repeat_penalty": 1.0,
-        "penalize_nl": False,
-        "stream": True,
-        "stop": ["<eos>", "<end_of_turn>"], # Gemma 2 TODO - Not sure if <eos> is necessary here...
-        # "stop": ["<|endoftext|>"], # Phi 3
-        # "stop": ["<|eot_id|>"] # Llama 3
-    }
+    # Otherwise, we got a parsing error
+    parsing_error = result['parsing_error']
 
-    # Stream the response, so we can abort and retry quickly if the LLM gets stuck
-    content = ''
-    whitespace_char_count = 0
-    max_whitespace_char_count = 5
+    # If we've exhausted all our retries, just re-raise the exception
+    if max_retries <= 0:
+        raise parsing_error
 
-    try:
-        with httpx.stream('POST', "http://localhost:17727/completion", json=data, timeout=180) as response:
-            for text in response.iter_text():
-                try:
-                    data = json.loads(
-                        text.strip('data :') # Strip out "data :" prefix
-                    )
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to decode JSON: {text}")
-                    raise
+    # Extract the bad arguments from the raw result's function call
+    # TODO: Might need to account for multiple tool calls in the future?
+    bad_arguments = result['raw'].additional_kwargs['tool_calls'][0]['function']['arguments']
 
-                new_content = data['content']
-
-                # Increment whitespace character count if we see new whitespace, otherwise reset it
-                if new_content.strip() == '':
-                    whitespace_char_count += 1
-                else:
-                    whitespace_char_count = 0
-
-                # If we've seen too many whitespace characters in a row, assume the
-                # LLM is stuck and raise an exception
-                if whitespace_char_count > max_whitespace_char_count:
-                    raise ValueError(f"LLM generated too much whitespace: {content}")
-
-                # Otherwise, append the new content to the response
-                content += new_content
-                logger.debug(f"LLM partial response: {content}")
-                print(f"LLM partial response: {content}")
-
-    except ValueError as e:
-        # If we've exhausted all our retries, just re-raise the exception
-        if max_retries <= 0:
-            raise
-
-        # Otherwise, tell the LLM it got stuck and give it a chance to try again
-        logger.error(f"LLM generated too much whitespace: {content}")
-        prompt += f"\n\nYour previous attempt to respond to this prompt failed because you generated too much whitespace. Here is what you provided: {content}\n\nTry again to create a valid {return_model.__name__} object."
-        return generate_local_completion_with_validation(
-            prompt,
-            grammar,
-            return_model,
-            max_retries - 1
-        )
-
-    try:
-        # Validate the response
-        result = return_model.model_validate_json(content)
-    except ValidationError as e:
-        # If we've exhausted all our retries, just re-raise the exception
-        if max_retries <= 0:
-            raise
-
-        # If we hit validation errors, append the invalid output and error
-        # message(s) to the prompt and try again
-        logger.error(f"LLM response was invalid: {content} {e}")
-        prompt += f"\n\nYour output was invalid. Here is what you provided: {content}\n\nHere is the error message: {e}\n\nTry again to create a valid {return_model.__name__} object."
-        return generate_local_completion_with_validation(
-            prompt,
-            grammar,
-            return_model,
-            max_retries - 1
-        )
-
-    return result
-
-
-def generate_completion(
-    prompt: str,
-    return_model: BaseModel,
-    nested_models: Optional[List[BaseModel]] = None
-) -> BaseModel:
-    """
-    Generate a completion for a given model and message.
-    """
-    # Generate the GBNF grammar and documentation
-    grammar, documentation = generate_gbnf_grammar_and_documentation(
-        pydantic_model_list=[return_model] + (nested_models or [])
+    # Otherwise, include the error message in the prompt and try again
+    logger.error(f"LLM response was invalid: {bad_arguments} {parsing_error}")
+    prompt_template += f"\n\nYour output was invalid. Here is what you provided: {bad_arguments}\n\nHere is the error message: {parsing_error}\n\nTry again to create a valid {output_model.__name__} object."
+    return generate_completion_with_validation_langchain(
+        prompt_template,
+        partial_variables,
+        input_variables,
+        output_model,
+        llm_temperature=llm_temperature,
+        max_retries=max_retries - 1
     )
-
-    # Render a template with the model schema
-    template = template_env.get_template('_response_format.txt')
-    response_format = template.render(
-        model_docs=documentation,
-    )
-
-    # Take the prompt and extend it with an example of the model schema
-    prompt_with_schema = f"""
-    {prompt}\n\n
-    {response_format}
-    """
-
-    if settings.use_local_completions:
-        result = generate_local_completion_with_validation(
-            prompt_with_schema,
-            grammar,
-            return_model
-        )
-    else:
-        result = generate_completion_with_validation(
-            prompt_with_schema,
-            return_model
-        )
-
-    # Return the content
-    return result
-
 
 def download_file(url, output_path, chunk_size=1024*1024):
     """

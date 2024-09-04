@@ -3,10 +3,25 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from sqlmodel import SQLModel, Field as SQLModelField, Relationship, Column, JSON, Session, select
 
-from config import db_engine, template_env
-from core.utils import generate_completion
+from config import db_engine
+from core.utils import generate_completion_with_validation
 from emails.models import Message
 
+
+PROFILE_ATTRIBUTE_PROMPT_TEMPLATE = """
+    <context>
+    {{ general_context }}
+    <messages>
+    {% for message in message_details %}
+        {{ message }}
+    {% endfor %}
+    </messages>
+    </context>
+
+    <instructions>
+    {{ instructions }}
+    </instructions>
+    """
 
 class Profile(SQLModel, table=True):
     id: int | None = SQLModelField(default=None, primary_key=True)
@@ -55,25 +70,31 @@ class Profile(SQLModel, table=True):
         # If we already have a name, do nothing
         if self.name is not None:
             return
-        
-        # Get the 10 most recent messages # TODO: Increase this after switching to Llama 3.1
-        with Session(db_engine) as session: 
-            messages = session.exec(
-                select(Message).where(Message.mailbox_id == self.mailbox_id).order_by(Message.received_at.desc()).limit(10)
-            ).all()
+
+        partial_variables = {
+            'instructions': "Based on the user's email address and the the contents of these 20 recent email messages from the user's inbox, determine the user's full name."
+        }
 
         class FullName(BaseModel):
             full_name: str = Field(max_length=80)
 
-        prompt = template_env.get_template('profile_attribute_prompt.txt').render(
-            messages=messages,
-            general_context=self.mailbox.get_general_context(),
-            instructions="Based on the user's email address and the the contents of these 20 recent email messages from the user's inbox, determine the user's full name.",
-        )
+        # Get the 20 most recent messages
+        with Session(db_engine) as session: 
+            messages = session.exec(
+                select(Message).where(Message.mailbox_id == self.mailbox_id).order_by(Message.received_at.desc()).limit(20)
+            ).all()
 
-        result = generate_completion(
-            prompt=prompt,
-            return_model=FullName
+        input_variables = {
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': [message.get_details() for message in messages]
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=PROFILE_ATTRIBUTE_PROMPT_TEMPLATE,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=FullName,
+            llm_temperature=0
         )
 
         self.name = result.full_name
@@ -86,21 +107,27 @@ class Profile(SQLModel, table=True):
         if self.primary_address is not None:
             return
         
-        # Get the 10 messages from the user's mailbox which are 'order confirmation' messages
-        order_confirmation_messages = self.mailbox.search_embeddings('order confirmation')
+        partial_variables = {
+            'instructions': "Based on the contents of these 20 recent order confirmation messages from the user's inbox, determine the user's primary physical address. Example output: '123 Main St, Anytown, CA 12345'.",
+        }
 
         class PrimaryAddress(BaseModel):
             primary_address: str = Field(max_length=160)
 
-        prompt = template_env.get_template('profile_attribute_prompt.txt').render(
-            messages=order_confirmation_messages,
-            general_context=self.mailbox.get_general_context(),
-            instructions="Based on the contents of these 10 recent order confirmation messages from the user's inbox, determine the user's primary physical address. Example output: '123 Main St, Anytown, CA 12345'.",
-        )
+        # Get the 20 messages from the user's mailbox which are 'order confirmation' messages
+        order_confirmation_messages = self.mailbox.search_embeddings('order confirmation', k=20)
 
-        result = generate_completion(
-            prompt=prompt,
-            return_model=PrimaryAddress
+        input_variables = {
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': [message.get_details() for message in order_confirmation_messages]
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=PROFILE_ATTRIBUTE_PROMPT_TEMPLATE,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=PrimaryAddress,
+            llm_temperature=0
         )
 
         self.primary_address = result.primary_address
@@ -114,21 +141,27 @@ class Profile(SQLModel, table=True):
         if len(self.financial_institutions) > 0:
             return
         
-        # Get the 10 messages from the user's mailbox which are 'banking' messages
-        banking_messages = self.mailbox.search_embeddings('banking')
+        partial_variables = {
+            'instructions': "Based on the contents of these 20 recent banking messages from the user's inbox, determine the list of financial institutions the user has accounts with. Include each institution only once. Do not include credit bureaus like TransUnion, Equifax, or Experian. Example output: [\"Bank of America\", \"Chase\", \"Wells Fargo\"].",
+        }
 
         class FinancialInstitutions(BaseModel):
             financial_institutions: List[str] = Field(max_length=80)
 
-        prompt = template_env.get_template('profile_attribute_prompt.txt').render(
-            messages=banking_messages,
-            general_context=self.mailbox.get_general_context(),
-            instructions="Based on the contents of these 10 recent banking messages from the user's inbox, determine the list of financial institutions the user has accounts with. Include each institution only once. Do not include credit bureaus like TransUnion, Equifax, or Experian. Example output: [\"Bank of America\", \"Chase\", \"Wells Fargo\"].",
-        )
+        # Get the 20 messages from the user's mailbox which are 'banking' messages
+        banking_messages = self.mailbox.search_embeddings('banking', k=20)
 
-        result = generate_completion(
-            prompt=prompt,
-            return_model=FinancialInstitutions
+        input_variables = {
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': [message.get_details() for message in banking_messages]
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=PROFILE_ATTRIBUTE_PROMPT_TEMPLATE,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=FinancialInstitutions,
+            llm_temperature=0
         )
 
         self.financial_institutions = result.financial_institutions

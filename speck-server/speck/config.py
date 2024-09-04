@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     os.makedirs(playwright_browsers_dir, exist_ok=True)
     os.environ['PLAYWRIGHT_BROWSERS_PATH'] = playwright_browsers_dir
 
-    # Model server
+    # Local model server
     models_dir: str = os.path.join(speck_data_dir, 'models')
 
     llamafile_exe_path: str = os.path.join(BASE_DIR, 'llamafile')
@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     # Cloud vs. local completion
     use_local_completions: bool = False
+
+    # Fireworks
+    fireworks_default_model: str = 'accounts/fireworks/models/llama-v3p1-70b-instruct'
 
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'

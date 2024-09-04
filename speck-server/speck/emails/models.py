@@ -4,13 +4,9 @@ import enum
 import email
 import uuid
 import html2text
-from langchain_core.pydantic_v1 import BaseModel as LangChainBaseModel, Field as LangChainField, ValidationError as LangChainValidationError
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser, RetryOutputParser
-from langchain_fireworks import ChatFireworks
 import logging
 import pendulum
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import declared_attr
@@ -18,8 +14,8 @@ from sqlite_vec import serialize_float32
 from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Relationship, select, delete, text, bindparam, BLOB
 from typing import List, Literal, Optional
 
-from config import db_engine, template_env
-from core.utils import generate_completion, generate_embedding
+from config import db_engine
+from core.utils import generate_embedding, generate_completion_with_validation
 from core.task_manager import task_manager
 from library import speck_library, FunctionResult
 
@@ -229,7 +225,7 @@ class Mailbox(SQLModel, table=True):
             }
         return mailbox_data
 
-    def search_embeddings(self, query: str):
+    def search_embeddings(self, query: str, k: int = 10):
         """Search the mailbox's embeddings for a query."""
         # Generate an embedding for the query
         query_embedding = generate_embedding(query)
@@ -238,9 +234,10 @@ class Mailbox(SQLModel, table=True):
         # Run the query against the VecMessage table to find the 10 most similar messages
         with Session(db_engine) as session:
             results = session.exec(text(
-                'select * from vec_message where body_embedding match :query_embedding and k = 10'
+                'select * from vec_message where body_embedding match :query_embedding limit :k'
             ).bindparams(
-                query_embedding=serialized_query_embedding
+                query_embedding=serialized_query_embedding,
+                k=k
             )).all()
 
             # Get the message_ids from the results
@@ -404,7 +401,7 @@ class Message(SQLModel, table=True):
         self.generate_summary()
         self.select_functions()
 
-    def get_message_details(self):
+    def get_details(self):
         """
         Renders the message details for this message, to be used in prompts.
         """
@@ -448,29 +445,26 @@ class Message(SQLModel, table=True):
         </instructions>
         """
 
-        categorize_prompt = ChatPromptTemplate.from_template(
-            template=prompt_template,
-            template_format='jinja2',
-            partial_variables={
-                'instructions': 'Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
-                'message_type_descriptions': MESSAGE_TYPE_DESCRIPTIONS
-            }
-        )
+        partial_variables = {
+            'instructions': 'Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
+            'message_type_descriptions': MESSAGE_TYPE_DESCRIPTIONS
+        }
 
         class CategorizeMessageType(BaseModel):
             type: MessageType
 
-        llm = ChatFireworks(
-            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
-            temperature=0
-        ).with_structured_output(CategorizeMessageType)
-
-        chain = categorize_prompt | llm
-
-        result = chain.invoke(input={
+        input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': self.get_message_details()
-        })
+            'message_details': self.get_details()
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=prompt_template,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=CategorizeMessageType,
+            llm_temperature=0
+        )
 
         self.message_type = result.type
 
@@ -491,38 +485,24 @@ class Message(SQLModel, table=True):
         </instructions>
         """
 
-        summary_prompt = ChatPromptTemplate.from_template(
-            template=prompt_template,
-            template_format='jinja2',
-            partial_variables={
-                'instructions': 'Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.'
-            }
+        partial_variables = {
+            'instructions': 'Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.'
+        }
+
+        class MessageSummary(BaseModel):
+            summary: str = Field(max_length=80)
+
+        input_variables = {
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': self.get_details()
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=prompt_template,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=MessageSummary
         )
-
-        class MessageSummary(LangChainBaseModel):
-            summary: str = LangChainField(max_length=80)
-
-        llm = ChatFireworks(
-            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
-            temperature=0.2
-        ).with_structured_output(MessageSummary, include_raw=True)
-
-        # parser = PydanticOutputParser(pydantic_object=MessageSummary)
-
-        chain = summary_prompt | llm
-
-        try:
-            result = chain.invoke({
-                'general_context': self.mailbox.get_general_context(),
-                'message_details': self.get_message_details()
-            })
-        except LangChainValidationError as e:
-            parser = PydanticOutputParser(pydantic_object=MessageSummary)
-            retry_parser = RetryOutputParser(parser=parser, max_retries=2)
-            import pdb; pdb.set_trace()
-            retry_parser.parse_with_prompt()
-
-        import pdb; pdb.set_trace()
 
         self.summary = result.summary
 
@@ -561,30 +541,27 @@ class Message(SQLModel, table=True):
         </context>
         """
 
-        select_functions_prompt = ChatPromptTemplate.from_template(
-            template=prompt_template,
-            template_format='jinja2',
-            partial_variables={
-                'instructions': "Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
-                'speck_library': speck_library
-            }
-        )
+        partial_variables = {
+            'instructions': "Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
+            'speck_library': speck_library
+        }
 
         class SelectedFunctions(BaseModel):
             no_functions_selected: bool = Field(default=True)
             functions: Optional[List[SelectedFunction]] = None
 
-        llm = ChatFireworks(
-            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
-            temperature=0
-        ).with_structured_output(SelectedFunctions)
-
-        chain = select_functions_prompt | llm
-
-        result = chain.invoke({
+        input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': self.get_message_details()
-        })
+            'message_details': self.get_details()
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=prompt_template,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=SelectedFunctions,
+            llm_temperature=0
+        )
 
         if result.functions is not None:
             self.selected_functions = {func.name: func.model_dump_json() for func in result.functions}
