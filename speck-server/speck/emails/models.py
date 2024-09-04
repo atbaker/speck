@@ -4,9 +4,13 @@ import enum
 import email
 import uuid
 import html2text
+from langchain_core.pydantic_v1 import BaseModel as LangChainBaseModel, Field as LangChainField, ValidationError as LangChainValidationError
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.output_parsers import PydanticOutputParser, RetryOutputParser
+from langchain_fireworks import ChatFireworks
 import logging
 import pendulum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import declared_attr
@@ -198,11 +202,14 @@ class Mailbox(SQLModel, table=True):
                 )
 
     def get_general_context(self):
-        """Get the general context of the message."""
-        return {
-            'current_utc_datetime': str(pendulum.now('utc')),
-            'user_email_address': self.email_address,
-        }
+        """Get the general context of the mailbox, to be used in prompts."""
+        general_context = f"""
+        <general-context>
+            <current-utc-datetime>{ str(pendulum.now('utc')) }</current-utc-datetime>
+            <user-email-address>{ self.email_address }</user-email-address>
+        </general-context>
+        """
+        return general_context
 
     def get_messages(self):
         """Get all the messages in the mailbox."""
@@ -394,8 +401,31 @@ class Message(SQLModel, table=True):
     def analyze_and_process(self):
         """Analyze a new message and process it."""
         self.set_type()
-        self.generate_summary_with_langchain()
+        self.generate_summary()
         self.select_functions()
+
+    def get_message_details(self):
+        """
+        Renders the message details for this message, to be used in prompts.
+        """
+        message_details = f"""
+        <email-message-user-received>
+            <from>{ self.from_ }</from>
+            <to>{ self.to }</to>
+            <cc>{ self.cc }</cc>
+            <bcc>{ self.bcc }</bcc>
+            <subject>{ self.subject }</subject>
+            <received-at>{ self.received_at }</received-at>
+
+            { '<message-type>' + self.message_type.value + '</message-type>' if self.message_type else ''}
+            { '<summary>' + self.summary + '</summary>' if self.summary else ''}
+            <body>
+            { self.body }
+            </body>
+        </email-message-user-received>
+        """
+
+        return message_details
 
     def set_type(self):
         """Categorize the message based on its contents."""
@@ -403,103 +433,158 @@ class Message(SQLModel, table=True):
         if self.message_type is not None:
             return
 
+        prompt_template = """
+        <context>
+        {{ general_context }}
+        {{ message_details }}
+        </context>
+
+        <instructions>
+        {{ instructions }}
+
+        {% for message_type, description in message_type_descriptions.items() %}
+        "{{ message_type.value }}": {{ description }}
+        {% endfor %}
+        </instructions>
+        """
+
+        categorize_prompt = ChatPromptTemplate.from_template(
+            template=prompt_template,
+            template_format='jinja2',
+            partial_variables={
+                'instructions': 'Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
+                'message_type_descriptions': MESSAGE_TYPE_DESCRIPTIONS
+            }
+        )
+
         class CategorizeMessageType(BaseModel):
             type: MessageType
 
-        prompt = template_env.get_template('message_type_prompt.txt').render(
-            message=self,
-            general_context=self.mailbox.get_general_context(),
-            instructions='Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
-            message_type_descriptions=MESSAGE_TYPE_DESCRIPTIONS
-        )
-        result = generate_completion(
-            prompt=prompt,
-            return_model=CategorizeMessageType,
-            nested_models=[MessageType]
-        )
+        llm = ChatFireworks(
+            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            temperature=0
+        ).with_structured_output(CategorizeMessageType)
+
+        chain = categorize_prompt | llm
+
+        result = chain.invoke(input={
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': self.get_message_details()
+        })
 
         self.message_type = result.type
 
-    def generate_summary_with_langchain(self):
-        """Test implementation of generate_summary using the Langchain library."""
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.messages import HumanMessage
-        from langchain_fireworks import ChatFireworks
-
-        summary_prompt = ChatPromptTemplate.from_template(
-            template='''
-            <context>
-            {message_details}
-            </context>
-
-            <instructions>
-            Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.
-            </instructions>
-            '''
-        )
-
-        class MessageSummary(BaseModel):
-            summary: str = Field(max_length=80)
-
-        # Initialize the ChatFireworks model
-        llm = ChatFireworks(model="accounts/fireworks/models/llama-v3p1-70b-instruct", temperature=0).with_structured_output(MessageSummary)
-
-        chain = summary_prompt | llm
-
-        message_details = template_env.get_template('_message_details.txt').render(
-            message=self
-        )
-
-        result = chain.invoke({
-            'message_details': message_details
-        })
-
-        self.summary = result.summary
-
     def generate_summary(self):
-        """Generate and store a short summary of the message."""
+        """Test implementation of generate_summary using the Langchain library."""
         # If we already have a summary, do nothing
         if self.summary is not None:
             return
 
-        class MessageSummary(BaseModel):
-            summary: str = Field(max_length=80)
+        prompt_template = """
+        <context>
+        {{ general_context }}
+        {{ message_details }}
+        </context>
 
-        prompt = template_env.get_template('message_summary_prompt.txt').render(
-            message=self,
-            general_context=self.mailbox.get_general_context(),
-            instructions='Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.',
+        <instructions>
+        {{ instructions }}
+        </instructions>
+        """
+
+        summary_prompt = ChatPromptTemplate.from_template(
+            template=prompt_template,
+            template_format='jinja2',
+            partial_variables={
+                'instructions': 'Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.'
+            }
         )
-        result = generate_completion(
-            prompt=prompt,
-            return_model=MessageSummary
-        )
+
+        class MessageSummary(LangChainBaseModel):
+            summary: str = LangChainField(max_length=80)
+
+        llm = ChatFireworks(
+            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            temperature=0.2
+        ).with_structured_output(MessageSummary, include_raw=True)
+
+        # parser = PydanticOutputParser(pydantic_object=MessageSummary)
+
+        chain = summary_prompt | llm
+
+        try:
+            result = chain.invoke({
+                'general_context': self.mailbox.get_general_context(),
+                'message_details': self.get_message_details()
+            })
+        except LangChainValidationError as e:
+            parser = PydanticOutputParser(pydantic_object=MessageSummary)
+            retry_parser = RetryOutputParser(parser=parser, max_retries=2)
+            import pdb; pdb.set_trace()
+            retry_parser.parse_with_prompt()
+
+        import pdb; pdb.set_trace()
 
         self.summary = result.summary
 
     def select_functions(self):
-        """
-        Analyzes this message vs. the library of available Speck functions and
-        selects the most relevant ones, if any, to surface to the user.
-        """
+        """Analyzes this message vs. the library of available Speck functions and selects the most relevant ones, if any, to surface to the user."""
+        # If we already have selected functions, do nothing
         if self.functions_analyzed:
             return
+
+        prompt_template = """
+        <instructions>
+        <speck-library>
+        {% for func_name, func_details in speck_library.functions.items() %}
+        <speck-function>
+        <name>
+        {{ func_name }}
+        </name>
+
+        <parameters>
+        {{ func_details.parameters }}
+        </parameters>
+
+        <description>
+        {{ func_details.description }}
+        </description>
+        </speck-function>
+        {% endfor %}
+        </speck-library>
+
+        {{ instructions }}
+        </instructions>
+
+        <context>
+        {{ general_context }}
+        {{ message_details }}
+        </context>
+        """
+
+        select_functions_prompt = ChatPromptTemplate.from_template(
+            template=prompt_template,
+            template_format='jinja2',
+            partial_variables={
+                'instructions': "Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
+                'speck_library': speck_library
+            }
+        )
 
         class SelectedFunctions(BaseModel):
             no_functions_selected: bool = Field(default=True)
             functions: Optional[List[SelectedFunction]] = None
 
-        prompt = template_env.get_template('select_functions_prompt.txt').render(
-            message=self,
-            general_context=self.mailbox.get_general_context(),
-            instructions="Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
-            speck_library=speck_library
-        )
-        result = generate_completion(
-            prompt=prompt,
-            return_model=SelectedFunctions,
-            nested_models=[SelectedFunction, SelectedFunctionArgument]
-        )
+        llm = ChatFireworks(
+            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            temperature=0
+        ).with_structured_output(SelectedFunctions)
+
+        chain = select_functions_prompt | llm
+
+        result = chain.invoke({
+            'general_context': self.mailbox.get_general_context(),
+            'message_details': self.get_message_details()
+        })
 
         if result.functions is not None:
             self.selected_functions = {func.name: func.model_dump_json() for func in result.functions}

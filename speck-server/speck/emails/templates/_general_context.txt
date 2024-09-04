@@ -1,4 +1,0 @@
-<general-context>
-    <current-utc-datetime>{{ general_context.current_utc_datetime }}</current-utc-datetime>
-    <user-email-address>{{ general_context.user_email_address }}</user-email-address>
-</general-context>
