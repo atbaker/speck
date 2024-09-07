@@ -32,6 +32,7 @@ class Mailbox(SQLModel, table=True):
     last_history_id: int | None = None
     last_synced_at: datetime | None = None
 
+    threads: list['Thread'] = Relationship(back_populates='mailbox')
     messages: list['Message'] = Relationship(back_populates='mailbox')
 
     created_at: datetime = SQLModelField(default_factory=datetime.now)
@@ -56,7 +57,7 @@ class Mailbox(SQLModel, table=True):
         response = client.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=25).execute()
         message_ids.update([message['id'] for message in response['messages']])
 
-        # Next, fetch non-inbox messages until our message_ids set has 1000 items
+        # Next, fetch non-inbox messages until our message_ids set has 500 items
         next_page_token = None
         while len(message_ids) < 500:  # TODO: Experiment with this number
             response = client.users().messages().list(userId='me', pageToken=next_page_token).execute()
@@ -67,8 +68,8 @@ class Mailbox(SQLModel, table=True):
             logging.info(f"Fetched {len(message_ids)} messages so far, next page token: {next_page_token}")
 
         # Iterate over each message and fetch its details
-        new_inbox_message_ids = []
-        new_non_inbox_message_ids = []
+        new_inbox_message_thread_ids = set()
+        new_message_ids = []
         with session or Session(db_engine) as session:
             for message_id in message_ids:
                 # If we have a Message record for this message_id, then we don't
@@ -82,12 +83,12 @@ class Mailbox(SQLModel, table=True):
                     )
                     message = session.exec(statement).one()
 
-                    # If the message still needs to be processed, schedule it
-                    if not message.processed:
-                        from .tasks import process_inbox_message
+                    # If the message's thread still needs to be processed, schedule it
+                    if not message.thread.processed:
+                        from .tasks import process_inbox_thread
                         task_manager.add_task(
-                            task=process_inbox_message,
-                            message_id=message_id
+                            task=process_inbox_thread,
+                            thread_id=message.thread_id
                         )
 
                     # And if we haven't generated an embedding yet, schedule it
@@ -113,6 +114,14 @@ class Mailbox(SQLModel, table=True):
                 message_history_id = int(response['historyId'])
                 if self.last_history_id is None or message_history_id > self.last_history_id:
                     self.last_history_id = message_history_id
+
+                # Create a Thread for this message if we don't already have one
+                try:
+                    statement = select(Thread).where(Thread.id == response['threadId'])
+                    thread = session.exec(statement).one()
+                except NoResultFound:
+                    thread = Thread(id=response['threadId'], mailbox_id=self.id)
+                    session.add(thread)
 
                 # Convert the raw data into an Email object
                 message.raw = base64.urlsafe_b64decode(response['raw'])
@@ -155,11 +164,13 @@ class Mailbox(SQLModel, table=True):
 
                 session.add(message)
 
-                # Append the message to the appropriate list
+                # If this message is now in the user's inbox, schedule a task
+                # to process the thread
                 if message.in_inbox:
-                    new_inbox_message_ids.append(message_id)
-                else:
-                    new_non_inbox_message_ids.append(message_id)
+                    new_inbox_message_thread_ids.add(message.thread_id)
+
+                # Add every new message to the new_message_ids list
+                new_message_ids.append(message_id)
 
             # Delete old Message objects for emails that are no longer in our set
             session.exec(delete(Message).where(Message.id.not_in(message_ids)))
@@ -171,17 +182,17 @@ class Mailbox(SQLModel, table=True):
             # Commit the changes
             session.commit()
 
-            # Schedule tasks to process the new inbox messages and generate embeddings
+            # Schedule tasks to process the new inbox threads and generate embeddings
             # for all messages. It helps to schedule the tasks in this order so the
             # Llamafile service manager doesn't have to switch back and forth between
             # generating completions and generating embeddings.
-            for message_id in new_inbox_message_ids:
-                from .tasks import process_inbox_message
+            for thread_id in new_inbox_message_thread_ids:
+                from .tasks import process_inbox_thread
                 task_manager.add_task(
-                    task=process_inbox_message,
-                    message_id=message_id
+                    task=process_inbox_thread,
+                    thread_id=thread_id
                 )
-            for message_id in new_inbox_message_ids + new_non_inbox_message_ids:
+            for message_id in new_message_ids:
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
                     task=generate_embedding_for_message,
@@ -271,7 +282,7 @@ class Mailbox(SQLModel, table=True):
         logging.info(f"Inserted message with ID: {response['id']}")
 
 
-class MessageType(str, enum.Enum):
+class ThreadCategory(str, enum.Enum):
     CORRESPONDENCE = 'Correspondence'
     PROFESSIONAL_OPPORTUNITIES = 'Professional Opportunities'
     RECEIPTS = 'Receipts'
@@ -293,27 +304,27 @@ class MessageType(str, enum.Enum):
     HEALTH_AND_WELLNESS = 'Health and Wellness'
     MISCELLANEOUS = 'Miscellaneous'
 
-MESSAGE_TYPE_DESCRIPTIONS = {
-    MessageType.CORRESPONDENCE: "Emails from individuals, including personal and professional communications.",
-    MessageType.PROFESSIONAL_OPPORTUNITIES: "Job opportunities, application statuses, career opportunities, and professional networking emails.",
-    MessageType.RECEIPTS: "Purchase confirmations, order receipts, and transaction details.",
-    MessageType.BILLS_AND_STATEMENTS: "Utility bills, credit card statements, bank statements, and loan notices.",
-    MessageType.PROMOTIONS_AND_DEALS: "Promotional emails, discount offers, coupons, and sales alerts.",
-    MessageType.NEWSLETTERS: "Regular email updates from subscribed newsletters, blogs, and websites.",
-    MessageType.UPDATES: "Updates from services or products, software updates, and feature announcements.",
-    MessageType.ORDER_CONFIRMATIONS: "Order confirmations and shipping notifications from online purchases.",
-    MessageType.PRODUCT_RECOMMENDATIONS: "Emails recommending products based on previous purchases or browsing history.",
-    MessageType.TICKETS_AND_BOOKINGS: "Travel itineraries, flight confirmations, hotel bookings, concert tickets, sports events, theater tickets, and event invitations.",
-    MessageType.COURSES_AND_LEARNING: "Online course updates, class schedules, and educational content.",
-    MessageType.ORGANIZATIONAL_ANNOUNCEMENTS: "Emails from educational institutions, company-wide emails from employers, and announcements from non-professional organizations.",
-    MessageType.UTILITIES_AND_SERVICES: "Notifications from utility providers, service updates, maintenance notices, internet, cable, phone providers, and other service companies.",
-    MessageType.SECURITY_ALERTS: "Account security notifications, password resets, and suspicious activity alerts.",
-    MessageType.SERVICE_NOTIFICATIONS: "Notifications from apps and services, error messages, and system alerts.",
-    MessageType.SURVEYS_AND_FEEDBACK: "Requests for feedback, surveys, and user experience questionnaires.",
-    MessageType.POLITICAL: "Political emails, including donation requests and campaign updates.",
-    MessageType.SPAM: "Unwanted emails, phishing attempts, and known spam.",
-    MessageType.HEALTH_AND_WELLNESS: "Emails from healthcare providers, appointment reminders, and health-related updates.",
-    MessageType.MISCELLANEOUS: "An email which does not fit any other category."
+THREAD_CATEGORY_DESCRIPTIONS = {
+    ThreadCategory.CORRESPONDENCE: "Emails from individuals, including personal and professional communications.",
+    ThreadCategory.PROFESSIONAL_OPPORTUNITIES: "Job opportunities, application statuses, career opportunities, and professional networking emails.",
+    ThreadCategory.RECEIPTS: "Purchase confirmations, order receipts, and transaction details.",
+    ThreadCategory.BILLS_AND_STATEMENTS: "Utility bills, credit card statements, bank statements, and loan notices.",
+    ThreadCategory.PROMOTIONS_AND_DEALS: "Promotional emails, discount offers, coupons, and sales alerts.",
+    ThreadCategory.NEWSLETTERS: "Regular email updates from subscribed newsletters, blogs, and websites.",
+    ThreadCategory.UPDATES: "Updates from services or products, software updates, and feature announcements.",
+    ThreadCategory.ORDER_CONFIRMATIONS: "Order confirmations and shipping notifications from online purchases.",
+    ThreadCategory.PRODUCT_RECOMMENDATIONS: "Emails recommending products based on previous purchases or browsing history.",
+    ThreadCategory.TICKETS_AND_BOOKINGS: "Travel itineraries, flight confirmations, hotel bookings, concert tickets, sports events, theater tickets, and event invitations.",
+    ThreadCategory.COURSES_AND_LEARNING: "Online course updates, class schedules, and educational content.",
+    ThreadCategory.ORGANIZATIONAL_ANNOUNCEMENTS: "Emails from educational institutions, company-wide emails from employers, and announcements from non-professional organizations.",
+    ThreadCategory.UTILITIES_AND_SERVICES: "Notifications from utility providers, service updates, maintenance notices, internet, cable, phone providers, and other service companies.",
+    ThreadCategory.SECURITY_ALERTS: "Account security notifications, password resets, and suspicious activity alerts.",
+    ThreadCategory.SERVICE_NOTIFICATIONS: "Notifications from apps and services, error messages, and system alerts.",
+    ThreadCategory.SURVEYS_AND_FEEDBACK: "Requests for feedback, surveys, and user experience questionnaires.",
+    ThreadCategory.POLITICAL: "Political emails, including donation requests and campaign updates.",
+    ThreadCategory.SPAM: "Unwanted emails, phishing attempts, and known spam.",
+    ThreadCategory.HEALTH_AND_WELLNESS: "Emails from healthcare providers, appointment reminders, and health-related updates.",
+    ThreadCategory.MISCELLANEOUS: "An email which does not fit any other category."
 }
 
 class SelectedFunctionArgument(BaseModel):
@@ -345,6 +356,117 @@ class ExecutedFunction(BaseModel):
     status: Literal['pending', 'success', 'error'] = 'pending'
     result: FunctionResult | None = None
 
+class Thread(SQLModel, table=True):
+    id: str | None = SQLModelField(default=None, primary_key=True)
+
+    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
+    mailbox: "Mailbox" = Relationship(back_populates='threads')
+
+    messages: list['Message'] = Relationship(
+        back_populates='thread',
+        sa_relationship_kwargs={
+            'lazy': 'subquery',
+            'order_by': 'desc(Message.received_at)'
+        }
+    )
+
+    category: ThreadCategory | None = SQLModelField(default=None, sa_column=Column(Enum(ThreadCategory)))
+    summary: str | None = None
+
+    functions_analyzed: bool = SQLModelField(default=False)
+    selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
+    executed_functions: dict[str, ExecutedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
+
+    created_at: datetime = SQLModelField(default_factory=datetime.now)
+
+    @property
+    def in_inbox(self):
+        """Returns True if the thread has a message in the user's inbox."""
+        return any(message.in_inbox for message in self.messages)
+
+    @property
+    def processed(self):
+        """
+        Returns True if the thread has been processed, according to the criteria below:
+
+        If the message is not in the user's inbox, then it needs no processing.
+
+        Otherwise, the message needs to have a category, summary, and functions
+        analyzed.
+        """
+        if not self.in_inbox:
+            return True
+
+        return self.category is not None and self.summary is not None and self.functions_analyzed
+
+    def get_details(self):
+        """
+        Renders the details for this thread and its messages, to be used in prompts.
+        """
+        message_details = '\n'.join([message.get_details() for message in self.messages])
+
+        thread_details = f"""
+        <email-thread>
+            { '<thread-category>' + self.category.value + '</thread-category>' if self.category else ''}
+            { '<thread-summary>' + self.summary + '</thread-summary>' if self.summary else ''}
+            <email-messages>
+                { message_details }
+            </email-messages>
+        </email-thread>
+        """
+
+        return thread_details
+
+    def analyze_and_process(self):
+        """Analyze and process the thread."""
+        self.set_category()
+        # self.generate_summary()
+        # self.select_functions()
+
+    def set_category(self):
+        """Categorize the thread based on its contents."""
+        # If we already have a category, do nothing
+        if self.category is not None:
+            return
+
+        prompt_template = """
+        <context>
+        {{ general_context }}
+        {{ thread_details }}
+        </context>
+
+        <instructions>
+        {{ instructions }}
+
+        {% for category, description in category_descriptions.items() %}
+        "{{ category.value }}": {{ description }}
+        {% endfor %}
+        </instructions>
+        """
+
+        partial_variables = {
+            'instructions': 'Categorize this email thread into one of the categories listed below. When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.',
+            'category_descriptions': THREAD_CATEGORY_DESCRIPTIONS
+        }
+
+        class CategorizeThread(BaseModel):
+            category: ThreadCategory
+
+        input_variables = {
+            'general_context': self.mailbox.get_general_context(),
+            'thread_details': self.get_details()
+        }
+
+        result = generate_completion_with_validation(
+            prompt_template=prompt_template,
+            partial_variables=partial_variables,
+            input_variables=input_variables,
+            output_model=CategorizeThread,
+            llm_temperature=0
+        )
+
+        self.category = result.category
+
 class Message(SQLModel, table=True):
     id: str | None = SQLModelField(default=None, primary_key=True)
 
@@ -353,7 +475,9 @@ class Message(SQLModel, table=True):
 
     raw: str
 
-    thread_id: str
+    thread_id: str = SQLModelField(default=None, foreign_key='thread.id')
+    thread: "Thread" = Relationship(back_populates='messages')
+
     label_ids: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
 
     from_: str
@@ -364,14 +488,7 @@ class Message(SQLModel, table=True):
     received_at: datetime
     body: str
 
-    message_type: MessageType | None = SQLModelField(default=None, sa_column=Column(Enum(MessageType)))
-    summary: str | None = None
-
     embedding_generated: bool = SQLModelField(default=False)
-
-    functions_analyzed: bool = SQLModelField(default=False)
-    selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
-    executed_functions: dict[str, ExecutedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
 
     created_at: datetime = SQLModelField(default_factory=datetime.now)
 
@@ -413,9 +530,6 @@ class Message(SQLModel, table=True):
             <bcc>{ self.bcc }</bcc>
             <subject>{ self.subject }</subject>
             <received-at>{ self.received_at }</received-at>
-
-            { '<message-type>' + self.message_type.value + '</message-type>' if self.message_type else ''}
-            { '<summary>' + self.summary + '</summary>' if self.summary else ''}
             <body>
             { self.body }
             </body>
@@ -423,50 +537,6 @@ class Message(SQLModel, table=True):
         """
 
         return message_details
-
-    def set_type(self):
-        """Categorize the message based on its contents."""
-        # If we already have a type, do nothing
-        if self.message_type is not None:
-            return
-
-        prompt_template = """
-        <context>
-        {{ general_context }}
-        {{ message_details }}
-        </context>
-
-        <instructions>
-        {{ instructions }}
-
-        {% for message_type, description in message_type_descriptions.items() %}
-        "{{ message_type.value }}": {{ description }}
-        {% endfor %}
-        </instructions>
-        """
-
-        partial_variables = {
-            'instructions': 'Categorize this email message into one of the categories listed below. If no category fits best, use the "Miscellaneous" category.',
-            'message_type_descriptions': MESSAGE_TYPE_DESCRIPTIONS
-        }
-
-        class CategorizeMessageType(BaseModel):
-            type: MessageType
-
-        input_variables = {
-            'general_context': self.mailbox.get_general_context(),
-            'message_details': self.get_details()
-        }
-
-        result = generate_completion_with_validation(
-            prompt_template=prompt_template,
-            partial_variables=partial_variables,
-            input_variables=input_variables,
-            output_model=CategorizeMessageType,
-            llm_temperature=0
-        )
-
-        self.message_type = result.type
 
     def generate_summary(self):
         """Test implementation of generate_summary using the Langchain library."""

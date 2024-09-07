@@ -149,7 +149,7 @@ def reset_database():
     Resets the Speck database. Used during local development.
     """
     # Delete all Message and VecMessage rows
-    from emails.models import Message, VecMessage
+    from emails.models import Message, VecMessage, Thread
     with Session(db_engine) as session:
         statement = select(Message)
         messages = session.exec(statement).all()
@@ -160,5 +160,10 @@ def reset_database():
         vec_messages = session.exec(statement).all()
         for vec_message in vec_messages:
             session.delete(vec_message)
+
+        statement = select(Thread)
+        threads = session.exec(statement).all()
+        for thread in threads:
+            session.delete(thread)
 
         session.commit()

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from config import db_engine
 from library import speck_library
 
-from .models import Mailbox, Message, SelectedFunctionArgument
+from .models import Mailbox, Message, Thread
 
 logger = logging.getLogger(__name__)
 
@@ -31,22 +31,22 @@ def sync_inbox():
 
     mailbox.sync_inbox()
 
-def process_inbox_message(message_id: int):
+def process_inbox_thread(thread_id: int):
     """
-    Process a new message.
+    Process a thread which has a message in the user's inbox.
     """
     with Session(db_engine) as session:
         try:
-            message = session.exec(select(Message).where(Message.id == message_id)).one()
-            message.mailbox
+            thread = session.exec(select(Thread).where(Thread.id == thread_id)).one()
+            thread.mailbox
         except NoResultFound:
             # If we didn't find a Message, then do nothing
             return
 
-    message.analyze_and_process()
+    thread.analyze_and_process()
 
     with Session(db_engine) as session:
-        session.add(message)
+        session.add(thread)
         session.commit()
 
 def generate_embedding_for_message(message_id: int):
