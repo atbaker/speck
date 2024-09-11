@@ -32,41 +32,48 @@ class LLMServiceManager:
 
     def start_llamafile_process(self, model_type):
         if model_type == 'embedding':
-            model_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
-            context_size = '512'
-            llamafile_port = '17726'
+            service_port = 17726
+            process_args = [
+                settings.llamafiler_exe_path,
+                '--listen',
+                f'127.0.0.1:{service_port}',
+                '--model',
+                os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
+            ]
         elif model_type == 'completion':
-            model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
-            context_size = '8192'
-            llamafile_port = '17727'
+            service_port = 17727
+            # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
+            # context_size = '8192'
+            model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf')
+            context_size = '16384'
+
+            process_args = [
+                settings.llamafile_exe_path,
+                '--server',
+                '--nobrowser',
+                '--port',
+                service_port,
+                '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
+                '9999',
+                '--no-mmap',
+                '--ctx-size',
+                context_size,
+                '--model',
+                model_path
+            ]
         else:
             raise ValueError(f"Invalid model type: {model_type}. Must be 'embedding' or 'completion'")
 
-        self.stdout_log = open(os.path.join(settings.log_dir, 'llamafile_stdout.log'), 'a')
-        self.stderr_log = open(os.path.join(settings.log_dir, 'llamafile_stderr.log'), 'a')
-
-        llamafile_process_args = [
-            settings.llamafile_exe_path,
-            '--server',
-            '--nobrowser',
-            '--port',
-            llamafile_port,
-            '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
-            '9999',
-            '--no-mmap',
-            '--ctx-size',
-            context_size,
-            '--model',
-            model_path
-        ]
+        self.stdout_log = open(os.path.join(settings.log_dir, 'inference_stdout.log'), 'a')
+        self.stderr_log = open(os.path.join(settings.log_dir, 'inference_stderr.log'), 'a')
 
         # Start the process with lower priority on macOS
         if settings.os_name == 'Darwin':
-            llamafile_process_args = ['nice', '-n', '10'] + llamafile_process_args
+            process_args = ['nice', '-n', '10'] + process_args
 
         try:
             process = subprocess.Popen(
-                llamafile_process_args,
+                process_args,
                 stdout=self.stdout_log,
                 stderr=self.stderr_log,
                 text=True
@@ -77,25 +84,31 @@ class LLMServiceManager:
                 p = psutil.Process(process.pid)
                 p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
-            # Poll the /health endpoint until the server is ready
-            health_url = f"http://127.0.0.1:{llamafile_port}/health"
-            for _ in range(60):  # Retry for up to 60 seconds
-                try:
-                    response = requests.get(health_url)
-                    if response.status_code == 200 and response.json().get("status") == "ok":
-                        return process
-                except requests.RequestException:
-                    pass
-                time.sleep(1)
-
-            # If the server did not become ready in time, kill the process
-            process.terminate()
-            logger.error("Error: Llamafile server did not become ready in time.")
-            return None
-
         except Exception as e:
             logger.error(f"Error starting Llamafile server: {e}")
             return None
+
+        # Poll the server until it is ready
+        if model_type == 'embedding':
+            health_url = f"http://127.0.0.1:{service_port}/embedding"
+            data = {'content': 'healthcheck'}
+        else:
+            health_url = f"http://127.0.0.1:{service_port}/health"
+            data = {}
+        for _ in range(60):  # Retry for up to 60 seconds
+            try:
+                response = requests.get(health_url, params=data)
+                # For the completion server, we need to check both for a 200 status code and a "status": "ok" field
+                if response.status_code == 200 and response.json().get("status", "ok") == "ok":
+                    return process
+            except requests.RequestException:
+                pass
+            time.sleep(1)
+
+        # If the server did not become ready in time, kill the process
+        process.terminate()
+        logger.error(f"Error: {model_type} server did not become ready in time.")
+        return None
 
     def start_server(self, model_type='embedding'):
         state = self._read_state()

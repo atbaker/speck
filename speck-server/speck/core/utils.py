@@ -4,7 +4,7 @@ from typing import Dict
 
 import httpx
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_fireworks import ChatFireworks
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from sqlite_vec import serialize_float32
 from sqlmodel import SQLModel, Session, select, text
@@ -30,7 +30,6 @@ def generate_embedding(content: str):
 
     return embedding
 
-
 def generate_completion_with_validation(
         prompt_template: str,
         partial_variables: Dict,
@@ -40,23 +39,37 @@ def generate_completion_with_validation(
         max_retries: int = 3
 ):
     """
-    Uses LangChain and Fireworks to evaluate a prompt and return a Pydantic
+    Uses LangChain and RunPod to evaluate a prompt and return a Pydantic
     model.
     """
+    from langchain_core.output_parsers import PydanticOutputParser
+    parser = PydanticOutputParser(pydantic_object=output_model)
+
+    # Extend the prompt with the output format, and add format instructions to our partial variables
+    prompt_template += "\n<output-format>Wrap the output in triple backticks (```), not <json> tags.\n{{format_instructions}}</output-format>"
+    partial_variables['format_instructions'] = parser.get_format_instructions()
+
+    # Render the prompt with the partial variables
     prompt = ChatPromptTemplate.from_template(
         template=prompt_template,
         template_format='jinja2',
         partial_variables=partial_variables
     )
 
-    llm = ChatFireworks(
-        model=settings.fireworks_default_model,
+    llm = ChatOpenAI(
+        base_url=settings.cloud_inference_endpoint,
+        model=settings.cloud_inference_model,
+        openai_api_key='not-necessary-for-runpod',
         temperature=llm_temperature
-    ).with_structured_output(output_model, include_raw=True)
+    )
 
-    chain = prompt | llm
+    chain = prompt | llm | parser
 
     result = chain.invoke(input=input_variables)
+
+    return result
+
+    # TODO Validation errors
 
     # If we got a parsed result on the first try, return it
     if result['parsed']:
@@ -76,7 +89,7 @@ def generate_completion_with_validation(
     # Otherwise, include the error message in the prompt and try again
     logger.error(f"LLM response was invalid: {bad_arguments} {parsing_error}")
     prompt_template += f"\n\nYour output was invalid. Here is what you provided: {bad_arguments}\n\nHere is the error message: {parsing_error}\n\nTry again to create a valid {output_model.__name__} object."
-    return generate_completion_with_validation_langchain(
+    return generate_completion_with_validation(
         prompt_template,
         partial_variables,
         input_variables,

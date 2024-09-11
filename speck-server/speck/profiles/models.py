@@ -72,16 +72,16 @@ class Profile(SQLModel, table=True):
             return
 
         partial_variables = {
-            'instructions': "Based on the user's email address and the the contents of these 20 recent email messages from the user's inbox, determine the user's full name."
+            'instructions': "Based on the user's email address and the the contents of these 10 recent email messages from the user's inbox, determine the user's full name."
         }
 
         class FullName(BaseModel):
             full_name: str = Field(max_length=80)
 
-        # Get the 20 most recent messages
+        # Get the 10 most recent messages
         with Session(db_engine) as session: 
             messages = session.exec(
-                select(Message).where(Message.mailbox_id == self.mailbox_id).order_by(Message.received_at.desc()).limit(20)
+                select(Message).where(Message.mailbox_id == self.mailbox_id).order_by(Message.received_at.desc()).limit(10)
             ).all()
 
         input_variables = {
@@ -108,14 +108,14 @@ class Profile(SQLModel, table=True):
             return
         
         partial_variables = {
-            'instructions': "Based on the contents of these 20 recent order confirmation messages from the user's inbox, determine the user's primary physical address. Example output: '123 Main St, Anytown, CA 12345'.",
+            'instructions': "Based on the contents of these 10 recent order confirmation messages from the user's inbox, determine the user's primary physical address. Example output: '123 Main St, Anytown, CA 12345'.",
         }
 
         class PrimaryAddress(BaseModel):
             primary_address: str = Field(max_length=160)
 
-        # Get the 20 messages from the user's mailbox which are 'order confirmation' messages
-        order_confirmation_messages = self.mailbox.search_embeddings('order confirmation', k=20)
+        # Get the 10 messages from the user's mailbox which are 'order confirmation' messages
+        order_confirmation_messages = self.mailbox.search_embeddings('order confirmation', k=10)
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
@@ -142,14 +142,14 @@ class Profile(SQLModel, table=True):
             return
         
         partial_variables = {
-            'instructions': "Based on the contents of these 20 recent banking messages from the user's inbox, determine the list of financial institutions the user has accounts with. Include each institution only once. Do not include credit bureaus like TransUnion, Equifax, or Experian. Example output: [\"Bank of America\", \"Chase\", \"Wells Fargo\"].",
+            'instructions': "Based on the contents of these 10 recent banking messages from the user's inbox, determine the list of financial institutions the user has accounts with. Include each institution only once. Do not include credit bureaus like TransUnion, Equifax, or Experian. Example output: [\"Bank of America\", \"Chase\", \"Wells Fargo\"].",
         }
 
         class FinancialInstitutions(BaseModel):
             financial_institutions: List[str] = Field(max_length=80)
 
-        # Get the 20 messages from the user's mailbox which are 'banking' messages
-        banking_messages = self.mailbox.search_embeddings('banking', k=20)
+        # Get the 10 messages from the user's mailbox which are 'banking' messages
+        banking_messages = self.mailbox.search_embeddings('banking', k=10)
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),

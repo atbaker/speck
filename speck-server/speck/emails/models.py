@@ -32,8 +32,14 @@ class Mailbox(SQLModel, table=True):
     last_history_id: int | None = None
     last_synced_at: datetime | None = None
 
-    threads: list['Thread'] = Relationship(back_populates='mailbox')
-    messages: list['Message'] = Relationship(back_populates='mailbox')
+    threads: list['Thread'] = Relationship(
+        back_populates='mailbox',
+        cascade_delete=True
+    )
+    messages: list['Message'] = Relationship(
+        back_populates='mailbox',
+        cascade_delete=True
+    )
 
     created_at: datetime = SQLModelField(default_factory=datetime.now)
 
@@ -92,7 +98,7 @@ class Mailbox(SQLModel, table=True):
                         )
 
                     # And if we haven't generated an embedding yet, schedule it
-                    if not message.embedding_generated:
+                    if not message.processed:
                         from .tasks import generate_embedding_for_message
                         task_manager.add_task(
                             task=generate_embedding_for_message,
@@ -175,6 +181,13 @@ class Mailbox(SQLModel, table=True):
             # Delete old Message objects for emails that are no longer in our set
             session.exec(delete(Message).where(Message.id.not_in(message_ids)))
 
+            # Find and delete old Thread objects for threads that no longer have any messages
+            thread_ids_to_delete = []
+            for thread in session.exec(select(Thread)).all():
+                if not thread.messages:
+                    thread_ids_to_delete.append(thread.id)
+            session.exec(delete(Thread).where(Thread.id.in_(thread_ids_to_delete)))
+
             # Update the Mailbox's last_synced_at
             self.last_synced_at = last_synced_at
             session.add(self)
@@ -204,9 +217,10 @@ class Mailbox(SQLModel, table=True):
             profile = session.exec(select(Profile)).one() # TODO: Multiple profiles
             if not profile.complete:
                 from profiles.tasks import update_profile
-                task_manager.add_task(
-                    task=update_profile
-                )
+                # TODO: Reenable later
+                # task_manager.add_task(
+                #     task=update_profile
+                # )
 
     def get_general_context(self):
         """Get the general context of the mailbox, to be used in prompts."""
@@ -364,6 +378,7 @@ class Thread(SQLModel, table=True):
 
     messages: list['Message'] = Relationship(
         back_populates='thread',
+        cascade_delete=True,
         sa_relationship_kwargs={
             'lazy': 'subquery',
             'order_by': 'desc(Message.received_at)'
@@ -420,8 +435,8 @@ class Thread(SQLModel, table=True):
     def analyze_and_process(self):
         """Analyze and process the thread."""
         self.set_category()
-        # self.generate_summary()
-        # self.select_functions()
+        self.generate_summary()
+        self.select_functions()
 
     def set_category(self):
         """Categorize the thread based on its contents."""
@@ -431,8 +446,8 @@ class Thread(SQLModel, table=True):
 
         prompt_template = """
         <context>
-        {{ general_context }}
         {{ thread_details }}
+        {{ general_context }}
         </context>
 
         <instructions>
@@ -467,87 +482,16 @@ class Thread(SQLModel, table=True):
 
         self.category = result.category
 
-class Message(SQLModel, table=True):
-    id: str | None = SQLModelField(default=None, primary_key=True)
-
-    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
-    mailbox: "Mailbox" = Relationship(back_populates='messages')
-
-    raw: str
-
-    thread_id: str = SQLModelField(default=None, foreign_key='thread.id')
-    thread: "Thread" = Relationship(back_populates='messages')
-
-    label_ids: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-
-    from_: str
-    to: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    cc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    bcc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    subject: str
-    received_at: datetime
-    body: str
-
-    embedding_generated: bool = SQLModelField(default=False)
-
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
-
-    @property
-    def in_inbox(self):
-        """Returns True if the message is in the user's inbox."""
-        return 'INBOX' in self.label_ids
-
-    @property
-    def processed(self):
-        """
-        Returns True if the message has been processed, according to the criteria below:
-
-        If the message is not in the user's inbox, then it needs no processing.
-
-        Otherwise, the message needs to have a type, summary, and functions
-        analyzed.
-        """
-        if not self.in_inbox:
-            return True
-
-        return self.message_type is not None and self.summary is not None and self.functions_analyzed
-
-    def analyze_and_process(self):
-        """Analyze a new message and process it."""
-        self.set_type()
-        self.generate_summary()
-        self.select_functions()
-
-    def get_details(self):
-        """
-        Renders the message details for this message, to be used in prompts.
-        """
-        message_details = f"""
-        <email-message-user-received>
-            <from>{ self.from_ }</from>
-            <to>{ self.to }</to>
-            <cc>{ self.cc }</cc>
-            <bcc>{ self.bcc }</bcc>
-            <subject>{ self.subject }</subject>
-            <received-at>{ self.received_at }</received-at>
-            <body>
-            { self.body }
-            </body>
-        </email-message-user-received>
-        """
-
-        return message_details
-
     def generate_summary(self):
-        """Test implementation of generate_summary using the Langchain library."""
+        """Generate a summary for the thread."""
         # If we already have a summary, do nothing
         if self.summary is not None:
             return
 
         prompt_template = """
         <context>
+        {{ thread_details }}
         {{ general_context }}
-        {{ message_details }}
         </context>
 
         <instructions>
@@ -556,59 +500,56 @@ class Message(SQLModel, table=True):
         """
 
         partial_variables = {
-            'instructions': 'Summarize this email into one phrase of maximum 80 characters. Focus on the main point of the message and any actionable items for the user.'
+            'instructions': 'Summarize this email thread into one phrase of maximum 80 characters. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.'
         }
 
-        class MessageSummary(BaseModel):
+        class ThreadSummary(BaseModel):
             summary: str = Field(max_length=80)
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': self.get_details()
+            'thread_details': self.get_details()
         }
 
         result = generate_completion_with_validation(
             prompt_template=prompt_template,
             partial_variables=partial_variables,
             input_variables=input_variables,
-            output_model=MessageSummary
+            output_model=ThreadSummary
         )
 
         self.summary = result.summary
 
     def select_functions(self):
-        """Analyzes this message vs. the library of available Speck functions and selects the most relevant ones, if any, to surface to the user."""
+        """Analyzes this thread vs. the library of available Speck functions and selects the most relevant ones, if any, to surface to the user."""
         # If we already have selected functions, do nothing
         if self.functions_analyzed:
             return
 
         prompt_template = """
-        <instructions>
+        <context>
+        {{ thread_details }}
         <speck-library>
         {% for func_name, func_details in speck_library.functions.items() %}
         <speck-function>
         <name>
         {{ func_name }}
         </name>
-
         <parameters>
         {{ func_details.parameters }}
         </parameters>
-
         <description>
         {{ func_details.description }}
         </description>
         </speck-function>
         {% endfor %}
         </speck-library>
+        {{ general_context }}
+        </context>
 
+        <instructions>
         {{ instructions }}
         </instructions>
-
-        <context>
-        {{ general_context }}
-        {{ message_details }}
-        </context>
         """
 
         partial_variables = {
@@ -622,7 +563,7 @@ class Message(SQLModel, table=True):
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': self.get_details()
+            'thread_details': self.get_details()
         }
 
         result = generate_completion_with_validation(
@@ -636,6 +577,7 @@ class Message(SQLModel, table=True):
         if result.functions is not None:
             self.selected_functions = {func.name: func.model_dump_json() for func in result.functions}
         self.functions_analyzed = True
+
 
     def execute_function(self, function_name: str):
         """Execute a Speck Function based on this message."""
@@ -664,6 +606,63 @@ class Message(SQLModel, table=True):
             **self.executed_functions,
             executed_function.id: executed_function.model_dump_json()
         }
+
+class Message(SQLModel, table=True):
+    id: str | None = SQLModelField(default=None, primary_key=True)
+
+    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id', ondelete='CASCADE')
+    mailbox: "Mailbox" = Relationship(back_populates='messages')
+
+    raw: str
+
+    thread_id: str = SQLModelField(default=None, foreign_key='thread.id', ondelete='CASCADE')
+    thread: "Thread" = Relationship(back_populates='messages')
+
+    label_ids: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+
+    from_: str
+    to: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    cc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    bcc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    subject: str
+    received_at: datetime
+    body: str
+
+    embedding_generated: bool = SQLModelField(default=False)
+
+    created_at: datetime = SQLModelField(default_factory=datetime.now)
+
+    @property
+    def in_inbox(self):
+        """Returns True if the message is in the user's inbox."""
+        return 'INBOX' in self.label_ids
+
+    @property
+    def processed(self):
+        """
+        Returns True if the message has had its embedding generated.
+        """
+        return self.embedding_generated
+
+    def get_details(self):
+        """
+        Renders the message details for this message, to be used in prompts.
+        """
+        message_details = f"""
+        <email-message-user-received>
+            <from>{ self.from_ }</from>
+            <to>{ self.to }</to>
+            <cc>{ self.cc }</cc>
+            <bcc>{ self.bcc }</bcc>
+            <subject>{ self.subject }</subject>
+            <received-at>{ self.received_at }</received-at>
+            <body>
+            { self.body }
+            </body>
+        </email-message-user-received>
+        """
+
+        return message_details
 
     def generate_embedding(self):
         """Generate an embedding for the message."""

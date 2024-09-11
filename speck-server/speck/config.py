@@ -46,16 +46,18 @@ class Settings(BaseSettings):
     models_dir: str = os.path.join(speck_data_dir, 'models')
 
     llamafile_exe_path: str = os.path.join(BASE_DIR, 'llamafile')
+    llamafiler_exe_path: str = os.path.join(BASE_DIR, 'llamafiler')
     # Append a ".exe" extension if on Windows
     if os_name == 'Windows':
         llamafile_exe_path += '.exe'
+        llamafiler_exe_path += '.exe'
 
     # Cloud vs. local completion
     use_local_completions: bool = False
 
-    # Fireworks
-    fireworks_default_model: str = 'accounts/fireworks/models/llama-v3p1-70b-instruct'
-
+    # Cloud inference
+    cloud_inference_endpoint: str = 'https://p6zdiqo2v97j4w-8000.proxy.runpod.net/v1'
+    cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
     gcp_client_secret: str = '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'
