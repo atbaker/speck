@@ -41,11 +41,9 @@ class LLMServiceManager:
                 os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
             ]
         elif model_type == 'completion':
-            service_port = 17727
-            # model_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
-            # context_size = '8192'
+            service_port = '17727'
             model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf')
-            context_size = '16384'
+            context_size = '10240' # TODO Maintain parity with cloud inference context size for now
 
             process_args = [
                 settings.llamafile_exe_path,
@@ -55,7 +53,6 @@ class LLMServiceManager:
                 service_port,
                 '-ngl', # TODO: Not sure if this has bad side effects when running on a machine without a GPU / with a crummy GPU
                 '9999',
-                '--no-mmap',
                 '--ctx-size',
                 context_size,
                 '--model',
@@ -205,10 +202,15 @@ class LLMServiceManager:
 
 llm_service_manager = LLMServiceManager()
 
-def use_inference_service(model_type='embedding'):
+def use_local_inference_service(model_type='embedding'):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # If our model_type is 'completion' and our 'use_local_completions'
+            # setting is False, then we can just execute the function normally
+            if model_type == 'completion' and not settings.use_local_completions:
+                return func(*args, **kwargs)
+
             pid = llm_service_manager.start_server(model_type)
             if not pid:
                 raise RuntimeError("Failed to start the inference service.")

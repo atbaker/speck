@@ -3,33 +3,34 @@ import os
 from typing import Dict
 
 import httpx
+from langchain_core.exceptions import OutputParserException
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
-from sqlite_vec import serialize_float32
 from sqlmodel import SQLModel, Session, select, text
 
 from config import db_engine, settings
 
-from .llm_service_manager import use_inference_service
+from .llm_service_manager import use_local_inference_service
 
 logger = logging.getLogger(__name__)
 
 
-@use_inference_service(model_type='embedding')
+@use_local_inference_service(model_type='embedding')
 def generate_embedding(content: str):
     """
-    Generate a serialized binary embedding for a given string using Llamafile.
+    Generate a serialized binary embedding for a given string using Llamafiler.
     """
     data = {
         'content': content
     }
-    response = httpx.post("http://localhost:17726/embedding", json=data)
+    response = httpx.post("http://127.0.0.1:17726/embedding", json=data)
 
     embedding = response.json()['embedding']
 
     return embedding
 
+@use_local_inference_service(model_type='completion')
 def generate_completion_with_validation(
         prompt_template: str,
         partial_variables: Dict,
@@ -56,47 +57,41 @@ def generate_completion_with_validation(
         partial_variables=partial_variables
     )
 
+    # Set our base_url for local or cloud completions
+    if settings.use_local_completions:
+        base_url = 'http://127.0.0.1:17727/v1'
+    else:
+        base_url = settings.cloud_inference_endpoint
+
     llm = ChatOpenAI(
-        base_url=settings.cloud_inference_endpoint,
+        base_url=base_url,
         model=settings.cloud_inference_model,
-        openai_api_key='not-necessary-for-runpod',
+        openai_api_key=settings.cloud_inference_api_key,
         temperature=llm_temperature
     )
 
     chain = prompt | llm | parser
 
-    result = chain.invoke(input=input_variables)
+    try:
+        result = chain.invoke(input=input_variables)
+    except OutputParserException as parsing_error:
+        # If we've exhausted all our retries, just re-raise the exception
+        if max_retries <= 0:
+            raise parsing_error
+
+        # Otherwise, include the error message in the prompt and try again
+        logger.error(f"LLM response was invalid: {parsing_error}")
+        prompt_template += f"\n\n<output-parsing-error>Your output was invalid. Here is what you provided: {parsing_error.llm_output}\n\nHere is the error message: {parsing_error}\n\nTry again to create a valid {output_model.__name__} object.</output-parsing-error>"
+        result = generate_completion_with_validation(
+            prompt_template,
+            partial_variables,
+            input_variables,
+            output_model,
+            llm_temperature=llm_temperature,
+            max_retries=max_retries - 1
+        )
 
     return result
-
-    # TODO Validation errors
-
-    # If we got a parsed result on the first try, return it
-    if result['parsed']:
-        return result['parsed']
-
-    # Otherwise, we got a parsing error
-    parsing_error = result['parsing_error']
-
-    # If we've exhausted all our retries, just re-raise the exception
-    if max_retries <= 0:
-        raise parsing_error
-
-    # Extract the bad arguments from the raw result's function call
-    # TODO: Might need to account for multiple tool calls in the future?
-    bad_arguments = result['raw'].additional_kwargs['tool_calls'][0]['function']['arguments']
-
-    # Otherwise, include the error message in the prompt and try again
-    logger.error(f"LLM response was invalid: {bad_arguments} {parsing_error}")
-    prompt_template += f"\n\nYour output was invalid. Here is what you provided: {bad_arguments}\n\nHere is the error message: {parsing_error}\n\nTry again to create a valid {output_model.__name__} object."
-    return generate_completion_with_validation(
-        prompt_template,
-        partial_variables,
-        input_variables,
-        output_model,
-        llm_temperature=llm_temperature,
-        max_retries=max_retries - 1
-    )
 
 def download_file(url, output_path, chunk_size=1024*1024):
     """

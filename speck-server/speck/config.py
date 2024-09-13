@@ -56,8 +56,10 @@ class Settings(BaseSettings):
     use_local_completions: bool = False
 
     # Cloud inference
-    cloud_inference_endpoint: str = 'https://p6zdiqo2v97j4w-8000.proxy.runpod.net/v1'
+    cloud_inference_endpoint: str = 'https://clu.myspeck.ai/v1'
+    cloud_inference_api_key: str = os.environ['VLLM_API_KEY'] # TODO: Will eventually connect via a cloud-hosted proxy instead of directly to VLLM
     cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
+
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
     gcp_client_secret: str = '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'

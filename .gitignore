@@ -1,6 +1,15 @@
 ### speck-app
 speck-server/data
 speck-server/speck/llamafile
+speck-server/speck/llamafiler
+
+# Terraform
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
 
 ### Node template
 
