@@ -45,7 +45,7 @@ class Mailbox(SQLModel, table=True):
 
     # profile: Optional["Profile"] = Relationship(back_populates="mailbox", sa_relationship_kwargs={"uselist": False})
 
-    def sync_inbox(self, session=None):
+    def full_sync(self):
         """
         Sync the Mailbox with the Gmail API.
 
@@ -73,144 +73,30 @@ class Mailbox(SQLModel, table=True):
             next_page_token = response['nextPageToken']
             logging.info(f"Fetched {len(message_ids)} messages so far, next page token: {next_page_token}")
 
-        # Iterate over each message and fetch its details
-        new_inbox_message_thread_ids = set()
-        new_message_ids = []
-        with session or Session(db_engine) as session:
-            for message_id in message_ids:
-                # If we have a Message record for this message_id, then we don't
-                # need to create a new one
-                try:
-                    statement = select(
-                        Message
-                    ).where(
-                        Message.id == message_id,
-                        Message.mailbox_id == self.id
-                    )
-                    message = session.exec(statement).one()
+        # Sync each Message, keeping track of the most recent history_id
+        most_recent_history_id = 0
+        for message_id in message_ids:
+            message = self.sync_message(message_id)
+            most_recent_history_id = max(most_recent_history_id, message.history_id)
 
-                    # If the message's thread still needs to be processed, schedule it
-                    if not message.thread.processed:
-                        from .tasks import process_inbox_thread
-                        task_manager.add_task(
-                            task=process_inbox_thread,
-                            thread_id=message.thread_id
-                        )
-
-                    # And if we haven't generated an embedding yet, schedule it
-                    if not message.processed:
-                        from .tasks import generate_embedding_for_message
-                        task_manager.add_task(
-                            task=generate_embedding_for_message,
-                            message_id=message_id
-                        )
-
-                    continue
-                except NoResultFound:
-                    message = Message(
-                        id=message_id,
-                        mailbox_id=self.id,
-                    )
-
-                # Get the raw data from Gmail for this message
-                logging.info(f"Fetching message {message_id} from Gmail")
-                response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
-
-                # Update the Mailbox's last_history_id
-                message_history_id = int(response['historyId'])
-                if self.last_history_id is None or message_history_id > self.last_history_id:
-                    self.last_history_id = message_history_id
-
-                # Create a Thread for this message if we don't already have one
-                try:
-                    statement = select(Thread).where(Thread.id == response['threadId'])
-                    thread = session.exec(statement).one()
-                except NoResultFound:
-                    thread = Thread(id=response['threadId'], mailbox_id=self.id)
-                    session.add(thread)
-
-                # Convert the raw data into an Email object
-                message.raw = base64.urlsafe_b64decode(response['raw'])
-                email_message = email.message_from_bytes(
-                    message.raw,
-                    policy=email.policy.default
-                )
-
-                # Parse the recipients and the body
-                to_recipients = [recipient.strip() for recipient in email_message['To'].split(',')] if email_message['To'] else []
-                cc_recipients = [recipient.strip() for recipient in email_message['Cc'].split(',')] if email_message['Cc'] else []
-                bcc_recipients = [recipient.strip() for recipient in email_message['Bcc'].split(',')] if email_message['Bcc'] else []
-
-                # Parse the date into a datetime
-                received_at = pendulum.from_format(email_message['Date'], 'ddd, DD MMM YYYY HH:mm:ss Z')
-
-                # Update the fields on the Message
-                message.thread_id = response['threadId']
-                message.label_ids = response.get('labelIds', []) # It seems messages inserted in the user's inbox via the Gmail API don't have labelIds
-                message.from_ = email_message['From']
-                message.to = to_recipients
-                message.cc = cc_recipients
-                message.bcc = bcc_recipients
-                message.subject = email_message['Subject']
-                message.received_at = received_at
-
-                # Use html2text to process the body
-                text_maker = html2text.HTML2Text()
-                text_maker.ignore_images = True
-                text_maker.ignore_links = True
-
-                try:
-                    content = email_message.get_body(preferencelist=('html', 'text')).get_content()
-                except AttributeError:
-                    # TODO If the message doesn't have a body, like a calendar invitation, just ignore it for now
-                    logging.info(f"Message {message_id} doesn't have a body, skipping")
-                    continue
-
-                message.body = text_maker.handle(content)
-
-                session.add(message)
-
-                # If this message is now in the user's inbox, schedule a task
-                # to process the thread
-                if message.in_inbox:
-                    new_inbox_message_thread_ids.add(message.thread_id)
-
-                # Add every new message to the new_message_ids list
-                new_message_ids.append(message_id)
-
-            # Delete old Message objects for emails that are no longer in our set
+        with Session(db_engine) as session:
+            # Delete old Message objects for messages that are no longer in our set
             session.exec(delete(Message).where(Message.id.not_in(message_ids)))
 
-            # Find and delete old Thread objects for threads that no longer have any messages
+            # Find and delete old Thread objects which no longer have any Messages
             thread_ids_to_delete = []
             for thread in session.exec(select(Thread)).all():
                 if not thread.messages:
                     thread_ids_to_delete.append(thread.id)
             session.exec(delete(Thread).where(Thread.id.in_(thread_ids_to_delete)))
 
-            # Update the Mailbox's last_synced_at
+            # Update the Mailbox's last_history_id and last_synced_at
+            self.last_history_id = most_recent_history_id
             self.last_synced_at = last_synced_at
             session.add(self)
 
             # Commit the changes
             session.commit()
-
-            # Schedule tasks to process the new inbox threads and generate embeddings
-            # for all messages. It helps to schedule the tasks in this order so the
-            # Llamafile service manager doesn't have to switch back and forth between
-            # generating completions and generating embeddings.
-            for thread_id in new_inbox_message_thread_ids:
-                from .tasks import process_inbox_thread
-                task_manager.add_task(
-                    task=process_inbox_thread,
-                    thread_id=thread_id
-                )
-            for message_id in new_message_ids:
-                from .tasks import generate_embedding_for_message
-                task_manager.add_task(
-                    task=generate_embedding_for_message,
-                    message_id=message_id
-                )
 
             # Also schedule a task to update the Profile if it's not complete
             from profiles.models import Profile
@@ -221,6 +107,178 @@ class Mailbox(SQLModel, table=True):
                 # task_manager.add_task(
                 #     task=update_profile
                 # )
+
+    def sync(self):
+        """
+        Sync the mailbox using the Gmail history API, using the Mailbox's
+        last_history_id.
+        """
+        # If our Mailbox doesn't have a last_history_id, then we need to
+        # perform a full sync instead
+        if not self.last_history_id:
+            self.full_sync()
+            return
+
+        client = get_gmail_api_client()
+        last_synced_at = pendulum.now('utc')
+
+        # Make a request to the Gmail history API using our last_history_id
+        response = client.users().history().list(
+            userId='me',
+            startHistoryId=self.last_history_id,
+            maxResults=500, # Maximum allowed value
+        ).execute()
+
+        # Iterate over each history entry
+        message_ids = set()
+        thread_ids_with_deleted_messages = set()
+        for history_entry in response.get('history', []):
+            # Delete messages which were deleted in this history entry (we'll
+            # clean up orphan Threads later)
+            for message_deleted_entry in history_entry.get('messagesDeleted', []):
+                thread_ids_with_deleted_messages.add(message_deleted_entry['message']['threadId'])
+                with Session(db_engine) as session:
+                    session.exec(
+                        delete(Message).where(
+                            Message.id == message_deleted_entry['message']['id'],
+                            Message.mailbox_id == self.id
+                        )
+                    )
+                    session.commit()
+
+            # Otherwise, check the other three potential types of history entries
+            # (messages changed, messages added, messages labeled)
+            for message_added_entry in history_entry.get('messagesAdded', []):
+                message_ids.add(message_added_entry['message']['id'])
+
+            for label_added_entry in history_entry.get('labelAdded', []):
+                message_ids.add(label_added_entry['message']['id'])
+
+            for label_removed_entry in history_entry.get('labelRemoved', []):
+                message_ids.add(label_removed_entry['message']['id'])
+
+        # Sync each Message
+        for message_id in message_ids:
+            self.sync_message(message_id)
+
+        # Look at our set of thread_ids_with_deleted_messages and delete any
+        # Threads which no longer have any Messages
+        with Session(db_engine) as session:
+            orphan_thread_ids = []
+            for thread in session.exec(
+                select(Thread).where(Thread.id.in_(thread_ids_with_deleted_messages))):
+                if not thread.messages:
+                    orphan_thread_ids.append(thread.id)
+            session.exec(delete(Thread).where(Thread.id.in_(orphan_thread_ids)))
+
+            # Update the Mailbox's last_history_id and last_synced_at
+            self.last_history_id = response['historyId']
+            self.last_synced_at = last_synced_at
+            session.add(self)
+
+            session.commit()
+
+        # If there was a nextPageToken in our response, then thare are more
+        # history updates available and we should sync again
+        if 'nextPageToken' in response:
+            self.sync()
+
+    def sync_message(self, message_id: str):
+        """
+        Sync a single message from the Gmail API by its ID.
+        """
+        client = get_gmail_api_client()
+
+        # Get or create the Message
+        with Session(db_engine) as session:
+            try:
+                statement = select(
+                    Message
+                ).where(
+                    Message.id == message_id,
+                    Message.mailbox_id == self.id
+                )
+                message = session.exec(statement).one()
+            except NoResultFound:
+                message = Message(
+                    id=message_id,
+                    mailbox_id=self.id,
+                )
+
+        # Get the raw data from Gmail for this message
+        logging.info(f"Fetching message {message_id} from Gmail")
+        response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
+
+        # Convert the raw data into an Email object
+        message.raw = base64.urlsafe_b64decode(response['raw'])
+        email_message = email.message_from_bytes(
+            message.raw,
+            policy=email.policy.default
+        )
+
+        # Parse the recipients and the body
+        to_recipients = [recipient.strip() for recipient in email_message['To'].split(',')] if email_message['To'] else []
+        cc_recipients = [recipient.strip() for recipient in email_message['Cc'].split(',')] if email_message['Cc'] else []
+        bcc_recipients = [recipient.strip() for recipient in email_message['Bcc'].split(',')] if email_message['Bcc'] else []
+
+        # Parse the date into a datetime
+        received_at = pendulum.from_format(email_message['Date'], 'ddd, DD MMM YYYY HH:mm:ss Z')
+
+        # Update the fields on the Message
+        message.history_id = response['historyId']
+        message.thread_id = response['threadId']
+        message.label_ids = response.get('labelIds', [])
+        message.from_ = email_message['From']
+        message.to = to_recipients
+        message.cc = cc_recipients
+        message.bcc = bcc_recipients
+        message.subject = email_message['Subject']
+        message.received_at = received_at
+
+        # Use html2text to process the body
+        text_maker = html2text.HTML2Text()
+        text_maker.ignore_images = True
+        text_maker.ignore_links = True
+
+        try:
+            content = email_message.get_body(preferencelist=('html', 'text')).get_content()
+            message.body = text_maker.handle(content)
+        except AttributeError:
+            # If the message doesn't have a body, like a calendar invitation,
+            # just set its body to an empty string for now
+            logging.info(f"Message {message_id} doesn't have a body, skipping")
+            message.body = ''
+
+        # Commit our message and create a Thread if we don't already have one
+        with Session(db_engine) as session:
+            session.add(message)
+
+            try:
+                statement = select(Thread).where(Thread.id == response['threadId'])
+                thread = session.exec(statement).one()
+            except NoResultFound:
+                thread = Thread(id=response['threadId'], mailbox_id=self.id)
+                session.add(thread)
+
+            session.commit()
+
+            # If the message's thread needs to be processed, schedule it
+            if not message.thread.processed:
+                from .tasks import process_inbox_thread
+                task_manager.add_task(
+                    task=process_inbox_thread,
+                    thread_id=message.thread_id
+                )
+
+            # And if the message hasn't been processed, generate an embedding for it
+            if not message.processed:
+                from .tasks import generate_embedding_for_message
+                task_manager.add_task(
+                    task=generate_embedding_for_message,
+                    message_id=message_id
+                )
+
+        return message
 
     def get_general_context(self):
         """Get the general context of the mailbox, to be used in prompts."""
@@ -614,6 +672,7 @@ class Message(SQLModel, table=True):
     mailbox: "Mailbox" = Relationship(back_populates='messages')
 
     raw: str
+    history_id: int
 
     thread_id: str = SQLModelField(default=None, foreign_key='thread.id', ondelete='CASCADE')
     thread: "Thread" = Relationship(back_populates='messages')

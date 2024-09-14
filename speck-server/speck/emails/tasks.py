@@ -29,7 +29,7 @@ def sync_inbox():
         logger.info("Skipping inbox sync because it was last synced less than 30 seconds ago")
         return
 
-    mailbox.sync_inbox()
+    mailbox.sync()
 
 def process_inbox_thread(thread_id: int):
     """

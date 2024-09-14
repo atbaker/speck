@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     use_local_completions: bool = False
 
     # Cloud inference
-    cloud_inference_endpoint: str = 'https://clu.myspeck.ai/v1'
+    cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'
     cloud_inference_api_key: str = os.environ['VLLM_API_KEY'] # TODO: Will eventually connect via a cloud-hosted proxy instead of directly to VLLM
     cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
 

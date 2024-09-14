@@ -104,10 +104,3 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
     task_manager.add_task(task=sync_inbox)
 
     return {"status": "success"}
-
-
-@router.get('/test-sync-inbox')
-async def test_sync_inbox(*, session: Session = Depends(get_db_session)):
-    mailbox = session.exec(select(Mailbox)).one()
-    mailbox.sync_inbox(session=session)
-    return {"status": "success"}

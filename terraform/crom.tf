@@ -74,7 +74,6 @@ resource "null_resource" "run_commands" {
       # Run certbot to generate SSL certificates using Docker
       <<EOT
       docker run \
-        --rm \
         --name certbot \
         -p 80:80 \
         -v "/etc/letsencrypt:/etc/letsencrypt" \
@@ -85,7 +84,7 @@ resource "null_resource" "run_commands" {
         --non-interactive \
         --agree-tos \
         -m andrew@gator.works \
-        -d clu.myspeck.ai
+        -d crom.myspeck.ai
       EOT
       ,
       
