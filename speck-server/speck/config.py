@@ -1,3 +1,4 @@
+from diskcache import Cache
 import os
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
@@ -31,6 +32,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
 
+    # Cache
+    cache_dir: str = os.path.join(speck_data_dir, 'cache')
+
     # Task manager
     task_manager_log_file: str = os.path.join(log_dir, 'worker.log') if PACKAGED else ''
     recurring_tasks: list[tuple[str, int, tuple, dict]] = [
@@ -53,7 +57,7 @@ class Settings(BaseSettings):
         llamafiler_exe_path += '.exe'
 
     # Cloud vs. local completion
-    use_local_completions: bool = False
+    use_local_completions: bool = True
 
     # Cloud inference
     cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'
@@ -89,6 +93,9 @@ def on_connect(connection, _):
     connection.enable_load_extension(True)
     sqlite_vec.load(connection)
     connection.enable_load_extension(False)
+
+# Diskcache
+cache = Cache(directory=settings.cache_dir)
 
 # Jinja2
 template_env = Environment(

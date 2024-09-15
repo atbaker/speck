@@ -10,8 +10,7 @@ from typing import Callable, Optional
 from logging.handlers import QueueHandler, QueueListener
 from sqlmodel import Session, select
 
-from config import db_engine
-from core.cache import initialize_cache
+from config import cache, db_engine
 from core.event_manager import event_manager
 
 # Function to configure worker logging
@@ -23,24 +22,29 @@ def configure_worker_logging(log_queue):
         logger.addHandler(queue_handler)
 
 # Worker function
-def worker(task_queue, stop_event, log_queue, cache_manager_dict, cache_manager_lock, task_manager_log_file, pipe_conn):
+def worker(
+        queue_name,
+        task_queues,
+        stop_event,
+        log_queue,
+        task_manager_log_file,
+        pipe_conn
+    ):
     configure_worker_logging(log_queue)
-    logger = logging.getLogger(f'worker-{multiprocessing.current_process().name}')
+    logger = logging.getLogger(f'worker-{queue_name}')
 
-    # Initialize the cache and task_manager using our multiprocessing objects
-    cache = initialize_cache(
-        cache_manager_dict=cache_manager_dict,
-        cache_manager_lock=cache_manager_lock
-    )
+    # Initialize the task manager so workers can schedule tasks themselves
     initialize_task_manager(
-        cache_manager_dict=cache_manager_dict,
-        cache_manager_lock=cache_manager_lock,
-        task_queue=task_queue,
+        task_queues=task_queues,
         log_queue=log_queue,
         stop_event=stop_event,
         log_file=task_manager_log_file
     )
 
+    # Identify which queue we're working
+    task_queue = task_queues[queue_name]
+
+    # Work the queue
     while not stop_event.is_set():
         try:
             task, args, kwargs = task_queue.get(timeout=1)
@@ -59,25 +63,24 @@ def worker(task_queue, stop_event, log_queue, cache_manager_dict, cache_manager_
             continue
 
 # Scheduler function using threading
-def scheduler(task_queue, stop_event, log_queue, recurring_tasks):
+def scheduler(task_queues, stop_event, log_queue, recurring_tasks):
     configure_worker_logging(log_queue)
     logger = logging.getLogger(f'scheduler-{threading.current_thread().name}')
 
-    # Schedule the initial next run times with an offset of 5 seconds to allow
-    # the setup tasks to get in the queue first
+    # Schedule the initial next run times
     next_run_times = {task: time.time() + 5 for task, interval, args, kwargs in recurring_tasks}
 
     while not stop_event.is_set():
         current_time = time.time()
         for task_name, interval, args, kwargs in recurring_tasks:
             if current_time >= next_run_times[task_name]:
-                # Convert the task name into a function object
                 module_name, function_name = task_name.rsplit('.', 1)
                 module = importlib.import_module(module_name)
                 task = getattr(module, function_name)
 
                 logger.info(f"Scheduling recurring task {task.__name__}")
-                task_queue.put((task, args, kwargs))
+                queue_name = kwargs.pop('queue_name', 'general')
+                task_queues[queue_name].put((task, args, kwargs))
                 next_run_times[task_name] = current_time + interval
 
         time.sleep(1)
@@ -85,7 +88,7 @@ def scheduler(task_queue, stop_event, log_queue, recurring_tasks):
 # Function to setup logging in the main process
 def setup_main_logger(log_queue, log_file=None):
     logger = logging.getLogger()
-    if not logger.hasHandlers():  # Add this check to avoid duplicate handlers
+    if not logger.hasHandlers():
         logger.setLevel(logging.INFO)
 
         if log_file:
@@ -105,15 +108,17 @@ def setup_main_logger(log_queue, log_file=None):
 class TaskManager:
     def __init__(
             self,
-            cache_manager_dict,
-            cache_manager_lock,
             log_file: Optional[str] = None,
             recurring_tasks: Optional[list] = None,
-            task_queue = None,
-            log_queue = None,
-            stop_event = None
+            task_queues=None,
+            log_queue=None,
+            stop_event=None
         ):
-        self.task_queue = task_queue if task_queue is not None else multiprocessing.Queue()
+        self.task_queues = task_queues if task_queues is not None else {
+            'general': multiprocessing.Queue(),
+            'completion': multiprocessing.Queue(),
+            'embedding': multiprocessing.Queue()
+        }
         self.workers = []
 
         self.recurring_tasks = recurring_tasks if recurring_tasks is not None else []
@@ -124,30 +129,29 @@ class TaskManager:
         self.log_file = log_file
         self.logger, self.queue_listener = setup_main_logger(self.log_queue, self.log_file)
 
-        # multiprocess Manager dict and lock for workers to use initializing the cache
-        self.cache_manager_dict = cache_manager_dict
-        self.cache_manager_lock = cache_manager_lock
+        # Create pipes for each worker
+        self.parent_conns = {}
+        self.child_conns = {}
 
-        # Create a pipe so the worker processes can communicate with the main process
-        self.parent_conn, self.child_conn = multiprocessing.Pipe()
+    def add_task(self, task: Callable, queue_name: str = 'general', *args, **kwargs):
+        self.logger.info(f"Adding task {task.__name__} to {queue_name} queue")
+        self.task_queues[queue_name].put((task, args, kwargs))
 
-    def add_task(self, task: Callable, *args, **kwargs):
-        self.logger.info(f"Adding task {task.__name__}")
-        self.task_queue.put((task, args, kwargs))
-
-    def start(self, num_workers: int = 4):
-        self.logger.info(f"Starting {num_workers} workers")
-        for _ in range(num_workers):
+    def start(self):
+        self.logger.info("Starting workers for each queue")
+        for queue_name in self.task_queues.keys():
+            parent_conn, child_conn = multiprocessing.Pipe()
+            self.parent_conns[queue_name] = parent_conn
+            self.child_conns[queue_name] = child_conn
             process = multiprocessing.Process(
                 target=worker,
                 args=(
-                    self.task_queue,
+                    queue_name,
+                    self.task_queues,
                     self._stop_event,
                     self.log_queue,
-                    self.cache_manager_dict,
-                    self.cache_manager_lock,
                     self.log_file,
-                    self.child_conn,
+                    child_conn,
                 )
             )
             process.start()
@@ -156,13 +160,13 @@ class TaskManager:
         # Start the scheduler thread
         scheduler_thread = threading.Thread(
             target=scheduler,
-            args=(self.task_queue, self._stop_event, self.log_queue, self.recurring_tasks)
+            args=(self.task_queues, self._stop_event, self.log_queue, self.recurring_tasks)
         )
         scheduler_thread.start()
         self.scheduler_thread = scheduler_thread
 
         # Start the pipe watcher thread
-        watcher_thread = threading.Thread(target=self.watch_pipe)
+        watcher_thread = threading.Thread(target=self.watch_pipes)
         watcher_thread.start()
         self.watcher_thread = watcher_thread
 
@@ -184,54 +188,35 @@ class TaskManager:
                 worker.terminate()
                 worker.join()
 
-        # TODO: Couldn't get the queue listener to stop properly on Windows,
-        # commenting out for now
-        # self.queue_listener.stop()
-
-    def watch_pipe(self):
+    def watch_pipes(self):
         while not self._stop_event.is_set():
-            if self.parent_conn.poll(1):  # Check if there is a message
-                task_name = self.parent_conn.recv()
+            for queue_name, parent_conn in self.parent_conns.items():
+                if parent_conn.poll(1):
+                    task_name = parent_conn.recv()
 
-                # Use the event system to push a Mailbox state update after
-                # completing a process_inbox_message task or a execute_function_for_message
-                # task
-                if task_name in ("process_inbox_message", "execute_function_for_message"):
-                    self.logger.info('Pushing mailbox state to event system')
-                    # TODO: Should probably make this a Mailbox class method
-                    from emails.models import Mailbox
-                    with Session(db_engine) as session:
-                        mailbox = session.exec(select(Mailbox)).one()
-                        message = { "type": "mailbox", "messages": mailbox.get_messages() }
-                        asyncio.run(event_manager.notify(message))
-            else:
-                time.sleep(0.1) # Avoid busy waiting
+                    if task_name in ("process_inbox_thread", "execute_function_for_message"):
+                        self.logger.info('Pushing mailbox state to event system')
+                        from emails.models import Mailbox
+                        with Session(db_engine) as session:
+                            mailbox = session.exec(select(Mailbox)).one()
+                            message = { "type": "mailbox", "messages": mailbox.get_messages() }
+                            asyncio.run(event_manager.notify(message))
+            time.sleep(0.1)
 
 task_manager = None
 
 def initialize_task_manager(
-        cache_manager_dict = None,
-        cache_manager_lock = None,
         log_file: Optional[str] = None,
         recurring_tasks: Optional[list] = None,
-        task_queue = None,
-        log_queue = None,
-        stop_event = None
+        task_queues=None,
+        log_queue=None,
+        stop_event=None
     ):
-    # If cache_manager_dict and cache_manager_lock are not provided, assume the
-    # cache has already been initialized in this process and use its values
-    from .cache import cache
-    if cache_manager_dict is None or cache_manager_lock is None:
-        cache_manager_dict = cache.cache
-        cache_manager_lock = cache.lock
-
     global task_manager
     task_manager = TaskManager(
-        cache_manager_dict=cache_manager_dict,
-        cache_manager_lock=cache_manager_lock,
         log_file=log_file,
         recurring_tasks=recurring_tasks,
-        task_queue=task_queue,
+        task_queues=task_queues,
         log_queue=log_queue,
         stop_event=stop_event
     )

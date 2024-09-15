@@ -131,6 +131,7 @@ class Mailbox(SQLModel, table=True):
                 from .tasks import process_inbox_thread
                 task_manager.add_task(
                     task=process_inbox_thread,
+                    queue_name='completion',
                     thread_id=thread.id
                 )
 
@@ -141,6 +142,7 @@ class Mailbox(SQLModel, table=True):
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
                     task=generate_embedding_for_message,
+                    queue_name='embedding',
                     message_id=message.id
                 )
 
@@ -322,6 +324,7 @@ class Mailbox(SQLModel, table=True):
                 from .tasks import process_inbox_thread
                 task_manager.add_task(
                     task=process_inbox_thread,
+                    queue_name='completion',
                     thread_id=message.thread_id
                 )
 
@@ -330,6 +333,7 @@ class Mailbox(SQLModel, table=True):
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
                     task=generate_embedding_for_message,
+                    queue_name='embedding',
                     message_id=message_id
                 )
 

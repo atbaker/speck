@@ -25,5 +25,5 @@ app.include_router(core_routes.router)
 
 @app.get("/")
 async def hello_world():
-    from core.cache import cache
+    from config import cache
     return {"output": f"Hello, world! Last task was {cache.get('last_task')}"}
