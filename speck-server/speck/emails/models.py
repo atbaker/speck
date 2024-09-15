@@ -2,6 +2,7 @@ import base64
 from datetime import datetime
 import enum
 import email
+from googleapiclient.errors import HttpError as GoogleApiHttpError
 import uuid
 import html2text
 import logging
@@ -59,8 +60,8 @@ class Mailbox(SQLModel, table=True):
         message_ids = set()
         last_synced_at = pendulum.now('utc')
 
-        # First, get the message ids for messages in the user's inbox
-        response = client.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=25).execute()
+        # First, get the message ids for all messages in the user's inbox
+        response = client.users().messages().list(userId='me', labelIds=['INBOX']).execute()
         message_ids.update([message['id'] for message in response['messages']])
 
         # Next, fetch non-inbox messages until our message_ids set has 500 items
@@ -80,8 +81,9 @@ class Mailbox(SQLModel, table=True):
             most_recent_history_id = max(most_recent_history_id, message.history_id)
 
         with Session(db_engine) as session:
-            # Delete old Message objects for messages that are no longer in our set
+            # Delete old Message and VecMessage objects for messages that are no longer in our set
             session.exec(delete(Message).where(Message.id.not_in(message_ids)))
+            session.exec(delete(VecMessage).where(VecMessage.message_id.not_in(message_ids)))
 
             # Find and delete old Thread objects which no longer have any Messages
             thread_ids_to_delete = []
@@ -119,15 +121,46 @@ class Mailbox(SQLModel, table=True):
             self.full_sync()
             return
 
-        client = get_gmail_api_client()
-        last_synced_at = pendulum.now('utc')
+        # Before we begin this new sync, check if any of our existing Threads
+        # and Messages are unprocessed
+        with Session(db_engine) as session:
+            unprocessed_threads = session.exec(
+                select(Thread).where(Thread.processed == False)
+            ).all()
+            for thread in unprocessed_threads:
+                from .tasks import process_inbox_thread
+                task_manager.add_task(
+                    task=process_inbox_thread,
+                    thread_id=thread.id
+                )
+
+            unprocessed_messages = session.exec(
+                select(Message).where(Message.embedding_generated == False)
+            ).all()
+            for message in unprocessed_messages:
+                from .tasks import generate_embedding_for_message
+                task_manager.add_task(
+                    task=generate_embedding_for_message,
+                    message_id=message.id
+                )
 
         # Make a request to the Gmail history API using our last_history_id
-        response = client.users().history().list(
-            userId='me',
-            startHistoryId=self.last_history_id,
-            maxResults=500, # Maximum allowed value
-        ).execute()
+        client = get_gmail_api_client()
+        last_synced_at = pendulum.now('utc')
+        try:
+            response = client.users().history().list(
+                userId='me',
+                startHistoryId=self.last_history_id,
+                maxResults=500, # Maximum allowed value
+            ).execute()
+        except GoogleApiHttpError as e:
+            if e.status_code == 404:
+                # If the error is a 404, then our last_history_id is too old
+                # and we need to perform a full sync
+                self.full_sync()
+                return
+            else:
+                raise e
 
         # Iterate over each history entry
         message_ids = set()
@@ -136,7 +169,8 @@ class Mailbox(SQLModel, table=True):
             # Delete messages which were deleted in this history entry (we'll
             # clean up orphan Threads later)
             for message_deleted_entry in history_entry.get('messagesDeleted', []):
-                thread_ids_with_deleted_messages.add(message_deleted_entry['message']['threadId'])
+                deleted_message = message_deleted_entry['message']
+                thread_ids_with_deleted_messages.add(deleted_message['threadId'])
                 with Session(db_engine) as session:
                     session.exec(
                         delete(Message).where(
@@ -144,7 +178,19 @@ class Mailbox(SQLModel, table=True):
                             Message.mailbox_id == self.id
                         )
                     )
+                    session.exec(
+                        delete(VecMessage).where(
+                            VecMessage.message_id == message_deleted_entry['message']['id']
+                        )
+                    )
                     session.commit()
+
+                # Also remove the message from our set of message_ids, so we
+                # don't try to fetch messages the user already deleted
+                try:
+                    message_ids.remove(deleted_message['id'])
+                except KeyError:
+                    pass
 
             # Otherwise, check the other three potential types of history entries
             # (messages changed, messages added, messages labeled)
@@ -178,7 +224,7 @@ class Mailbox(SQLModel, table=True):
 
             session.commit()
 
-        # If there was a nextPageToken in our response, then thare are more
+        # If there was a nextPageToken in our response, then there are more
         # history updates available and we should sync again
         if 'nextPageToken' in response:
             self.sync()
@@ -207,7 +253,16 @@ class Mailbox(SQLModel, table=True):
 
         # Get the raw data from Gmail for this message
         logging.info(f"Fetching message {message_id} from Gmail")
-        response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
+        try:
+            response = client.users().messages().get(userId='me', id=message_id, format='raw').execute()
+        except GoogleApiHttpError as e:
+            # If the error is a 404, then the message has been deleted from the
+            # user's mailbox and we don't need to sync it
+            if e.status_code == 404:
+                logging.info(f"Message {message_id} has been deleted from the user's mailbox, skipping")
+                return
+            else:
+                raise e
 
         # Convert the raw data into an Email object
         message.raw = base64.urlsafe_b64decode(response['raw'])
@@ -271,7 +326,7 @@ class Mailbox(SQLModel, table=True):
                 )
 
             # And if the message hasn't been processed, generate an embedding for it
-            if not message.processed:
+            if not message.embedding_generated:
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
                     task=generate_embedding_for_message,
@@ -434,6 +489,8 @@ class Thread(SQLModel, table=True):
     mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
     mailbox: "Mailbox" = Relationship(back_populates='threads')
 
+    processed: bool = SQLModelField(default=False, index=True)
+
     messages: list['Message'] = Relationship(
         back_populates='thread',
         cascade_delete=True,
@@ -457,21 +514,6 @@ class Thread(SQLModel, table=True):
         """Returns True if the thread has a message in the user's inbox."""
         return any(message.in_inbox for message in self.messages)
 
-    @property
-    def processed(self):
-        """
-        Returns True if the thread has been processed, according to the criteria below:
-
-        If the message is not in the user's inbox, then it needs no processing.
-
-        Otherwise, the message needs to have a category, summary, and functions
-        analyzed.
-        """
-        if not self.in_inbox:
-            return True
-
-        return self.category is not None and self.summary is not None and self.functions_analyzed
-
     def get_details(self):
         """
         Renders the details for this thread and its messages, to be used in prompts.
@@ -492,9 +534,21 @@ class Thread(SQLModel, table=True):
 
     def analyze_and_process(self):
         """Analyze and process the thread."""
+        # If this Thread has already been processed, do nothing
+        if self.processed:
+            return
+
+        # If the Thread isn't currently in the user's inbox, we don't need to
+        # do any work and can mark it as processed
+        if not self.in_inbox:
+            self.processed = True
+            return
+
+        # Otherwise, we need to set the category, summary, and selected functions
         self.set_category()
         self.generate_summary()
         self.select_functions()
+        self.processed = True
 
     def set_category(self):
         """Categorize the thread based on its contents."""
@@ -687,7 +741,7 @@ class Message(SQLModel, table=True):
     received_at: datetime
     body: str
 
-    embedding_generated: bool = SQLModelField(default=False)
+    embedding_generated: bool = SQLModelField(default=False, index=True)
 
     created_at: datetime = SQLModelField(default_factory=datetime.now)
 
@@ -695,13 +749,6 @@ class Message(SQLModel, table=True):
     def in_inbox(self):
         """Returns True if the message is in the user's inbox."""
         return 'INBOX' in self.label_ids
-
-    @property
-    def processed(self):
-        """
-        Returns True if the message has had its embedding generated.
-        """
-        return self.embedding_generated
 
     def get_details(self):
         """
@@ -725,6 +772,14 @@ class Message(SQLModel, table=True):
 
     def generate_embedding(self):
         """Generate an embedding for the message."""
+        # If this message has a blank body, we don't need to generate an embedding
+        if not self.body:
+            with Session(db_engine) as session:
+                self.embedding_generated = True
+                session.add(self)
+                session.commit()
+                return
+
         # Check if we already have an embedding
         with Session(db_engine) as session:
             try:

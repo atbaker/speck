@@ -156,21 +156,24 @@ def reset_database():
     """
     Resets the Speck database. Used during local development.
     """
-    # Delete all Message and VecMessage rows
-    from emails.models import Message, VecMessage, Thread
+    from emails.models import Mailbox, Message, VecMessage, Thread
     with Session(db_engine) as session:
-        statement = select(Message)
-        messages = session.exec(statement).all()
+        # Just reset the Mailbox's sync fields for now
+        mailboxes = session.exec(select(Mailbox)).all()
+        for mailbox in mailboxes:
+            mailbox.last_history_id = None
+            mailbox.last_synced_at = None
+            session.add(mailbox)
+
+        messages = session.exec(select(Message)).all()
         for message in messages:
             session.delete(message)
 
-        statement = select(VecMessage)
-        vec_messages = session.exec(statement).all()
+        vec_messages = session.exec(select(VecMessage)).all()
         for vec_message in vec_messages:
             session.delete(vec_message)
 
-        statement = select(Thread)
-        threads = session.exec(statement).all()
+        threads = session.exec(select(Thread)).all()
         for thread in threads:
             session.delete(thread)
 
