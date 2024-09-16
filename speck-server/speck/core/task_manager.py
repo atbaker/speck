@@ -199,7 +199,7 @@ class TaskManager:
                         from emails.models import Mailbox
                         with Session(db_engine) as session:
                             mailbox = session.exec(select(Mailbox)).one()
-                            message = { "type": "mailbox", "messages": mailbox.get_messages() }
+                            message = { "type": "mailbox", "threads": mailbox.get_threads() }
                             asyncio.run(event_manager.notify(message))
             time.sleep(0.1)
 

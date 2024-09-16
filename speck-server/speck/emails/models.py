@@ -50,54 +50,53 @@ class Mailbox(SQLModel, table=True):
         """
         Sync the Mailbox with the Gmail API.
 
-        - Fetch all emails currently in the user's inbox and the latest 1000 non-inbox emails
-        - Create Message objects for new emails in the response
-        - Delete old Message objects for emails that no longer meet the criteria
+        - Fetch all threads currently in the user's inbox
+        - And all threads with messages received in the past 31 days
+        - Fetch the messages in each thread and create Message objects for them
+        - Delete old Thread and Message objects for emails that no longer meet
+          the above criteria
         """
         client = get_gmail_api_client()
 
-        # Initialize our message_ids set and last_synced_at
-        message_ids = set()
+        # Initialize our thread_ids set and last_synced_at
+        thread_ids = set()
         last_synced_at = pendulum.now('utc')
 
-        # First, get the message ids for all messages in the user's inbox
-        response = client.users().messages().list(userId='me', labelIds=['INBOX']).execute()
-        message_ids.update([message['id'] for message in response['messages']])
+        # First, get the threads ids for all threads in the user's inbox
+        response = client.users().threads().list(userId='me', labelIds=['INBOX']).execute()
+        thread_ids.update([thread['id'] for thread in response['threads']])
 
-        # Next, fetch non-inbox messages until our message_ids set has 500 items
+        # Next, fetch all threads with messages received in the past 31 days
+        after_date = pendulum.now('utc').subtract(days=32) # 32 to be safe
         next_page_token = None
-        while len(message_ids) < 500:  # TODO: Experiment with this number
-            response = client.users().messages().list(userId='me', pageToken=next_page_token).execute()
-            message_ids.update([message['id'] for message in response['messages']])
+        while True:
+            response = client.users().threads().list(userId='me', q=f'after:{after_date.format("YYYY/MM/DD")}', pageToken=next_page_token).execute()
+            thread_ids.update([thread['id'] for thread in response['threads']])
             if 'nextPageToken' not in response:
                 break
             next_page_token = response['nextPageToken']
-            logging.info(f"Fetched {len(message_ids)} messages so far, next page token: {next_page_token}")
+            logging.info(f"Fetched {len(thread_ids)} threads so far, fetching next page...")
 
-        # Sync each Message, keeping track of the most recent history_id
+        # Sync each Thread, which will also sync all of its Messages, keeping
+        # track of the most recent history_id
         most_recent_history_id = 0
-        for message_id in message_ids:
-            message = self.sync_message(message_id)
-            most_recent_history_id = max(most_recent_history_id, message.history_id)
+        for thread_id in thread_ids:
+            thread = self.sync_thread(thread_id)
+            most_recent_history_id = max(most_recent_history_id, thread.history_id)
 
         with Session(db_engine) as session:
-            # Delete old Message and VecMessage objects for messages that are no longer in our set
-            session.exec(delete(Message).where(Message.id.not_in(message_ids)))
-            session.exec(delete(VecMessage).where(VecMessage.message_id.not_in(message_ids)))
-
-            # Find and delete old Thread objects which no longer have any Messages
-            thread_ids_to_delete = []
-            for thread in session.exec(select(Thread)).all():
-                if not thread.messages:
-                    thread_ids_to_delete.append(thread.id)
-            session.exec(delete(Thread).where(Thread.id.in_(thread_ids_to_delete)))
+            # Delete old Message, VecMessage, and Thread objects which are no
+            # longer in our set, using a subquery because VecMessage doesn't
+            # have a thread_id field
+            subquery = select(Message.id).where(Message.thread_id.not_in(thread_ids))
+            session.exec(delete(VecMessage).where(VecMessage.message_id == subquery.c.id))
+            session.exec(delete(Message).where(Message.thread_id.not_in(thread_ids)))
+            session.exec(delete(Thread).where(Thread.id.not_in(thread_ids)))
 
             # Update the Mailbox's last_history_id and last_synced_at
             self.last_history_id = most_recent_history_id
             self.last_synced_at = last_synced_at
             session.add(self)
-
-            # Commit the changes
             session.commit()
 
             # Also schedule a task to update the Profile if it's not complete
@@ -164,72 +163,91 @@ class Mailbox(SQLModel, table=True):
             else:
                 raise e
 
-        # Iterate over each history entry
-        message_ids = set()
-        thread_ids_with_deleted_messages = set()
+        # Iterate over each history entry, identifying which Threads changed, so
+        # we can sync them each (vs. trying to parse the history entries)
+        thread_ids = set()
         for history_entry in response.get('history', []):
             # Delete messages which were deleted in this history entry (we'll
             # clean up orphan Threads later)
             for message_deleted_entry in history_entry.get('messagesDeleted', []):
-                deleted_message = message_deleted_entry['message']
-                thread_ids_with_deleted_messages.add(deleted_message['threadId'])
-                with Session(db_engine) as session:
-                    session.exec(
-                        delete(Message).where(
-                            Message.id == message_deleted_entry['message']['id'],
-                            Message.mailbox_id == self.id
-                        )
-                    )
-                    session.exec(
-                        delete(VecMessage).where(
-                            VecMessage.message_id == message_deleted_entry['message']['id']
-                        )
-                    )
-                    session.commit()
-
-                # Also remove the message from our set of message_ids, so we
-                # don't try to fetch messages the user already deleted
-                try:
-                    message_ids.remove(deleted_message['id'])
-                except KeyError:
-                    pass
+                thread_ids.add(message_deleted_entry['message']['threadId'])
 
             # Otherwise, check the other three potential types of history entries
             # (messages changed, messages added, messages labeled)
             for message_added_entry in history_entry.get('messagesAdded', []):
-                message_ids.add(message_added_entry['message']['id'])
+                thread_ids.add(message_added_entry['message']['threadId'])
 
             for label_added_entry in history_entry.get('labelAdded', []):
-                message_ids.add(label_added_entry['message']['id'])
+                thread_ids.add(label_added_entry['message']['threadId'])
 
             for label_removed_entry in history_entry.get('labelRemoved', []):
-                message_ids.add(label_removed_entry['message']['id'])
+                thread_ids.add(label_removed_entry['message']['threadId'])
 
-        # Sync each Message
-        for message_id in message_ids:
-            self.sync_message(message_id)
+        # Sync each Thread
+        for thread_id in thread_ids:
+            self.sync_thread(thread_id)
 
-        # Look at our set of thread_ids_with_deleted_messages and delete any
-        # Threads which no longer have any Messages
+        # Update the Mailbox's last_history_id and last_synced_at
         with Session(db_engine) as session:
-            orphan_thread_ids = []
-            for thread in session.exec(
-                select(Thread).where(Thread.id.in_(thread_ids_with_deleted_messages))):
-                if not thread.messages:
-                    orphan_thread_ids.append(thread.id)
-            session.exec(delete(Thread).where(Thread.id.in_(orphan_thread_ids)))
-
-            # Update the Mailbox's last_history_id and last_synced_at
             self.last_history_id = response['historyId']
             self.last_synced_at = last_synced_at
             session.add(self)
-
             session.commit()
 
         # If there was a nextPageToken in our response, then there are more
         # history updates available and we should sync again
         if 'nextPageToken' in response:
             self.sync()
+
+    def sync_thread(self, thread_id: str):
+        """
+        Sync a single thread from the Gmail API by its ID.
+        """
+        client = get_gmail_api_client()
+
+        # Get or create the Thread
+        with Session(db_engine) as session:
+            try:
+                statement = select(Thread).where(Thread.id == thread_id, Thread.mailbox_id == self.id)
+                thread = session.exec(statement).one()
+            except NoResultFound:
+                thread = Thread(id=thread_id, mailbox_id=self.id)
+
+        # Get this Thread from the Gmail API
+        logging.info(f"Fetching thread {thread_id} from Gmail")
+        response = client.users().threads().get(userId='me', id=thread_id, format='minimal').execute()
+
+        # Set the history_id on the Thread
+        thread.history_id = response['historyId']
+
+        # Sync each Message in the Thread
+        thread_message_ids = [message['id'] for message in response['messages']]
+        for message_id in thread_message_ids:
+            self.sync_message(message_id)
+
+        with Session(db_engine) as session:
+            # Delete any Messages which used to be in the Thread but aren't anymore
+            session.exec(
+                delete(Message).where(
+                    Message.thread_id == thread_id,
+                    Message.id.not_in(thread_message_ids)
+                )
+            )
+
+            # Commit the Thread to the database
+            session.add(thread)
+            session.commit()
+
+            # If the thread needs to be processed, schedule it
+            if not thread.processed:
+                from .tasks import process_inbox_thread
+                task_manager.add_task(
+                    task=process_inbox_thread,
+                    queue_name='completion',
+                    thread_id=thread_id
+                )
+
+        return thread
 
     def sync_message(self, message_id: str):
         """
@@ -279,7 +297,7 @@ class Mailbox(SQLModel, table=True):
         bcc_recipients = [recipient.strip() for recipient in email_message['Bcc'].split(',')] if email_message['Bcc'] else []
 
         # Parse the date into a datetime
-        received_at = pendulum.from_format(email_message['Date'], 'ddd, DD MMM YYYY HH:mm:ss Z')
+        received_at = pendulum.from_timestamp(int(response['internalDate']) / 1000)
 
         # Update the fields on the Message
         message.history_id = response['historyId']
@@ -306,29 +324,12 @@ class Mailbox(SQLModel, table=True):
             logging.info(f"Message {message_id} doesn't have a body, skipping")
             message.body = ''
 
-        # Commit our message and create a Thread if we don't already have one
+        # Commit our message
         with Session(db_engine) as session:
             session.add(message)
-
-            try:
-                statement = select(Thread).where(Thread.id == response['threadId'])
-                thread = session.exec(statement).one()
-            except NoResultFound:
-                thread = Thread(id=response['threadId'], mailbox_id=self.id)
-                session.add(thread)
-
             session.commit()
 
-            # If the message's thread needs to be processed, schedule it
-            if not message.thread.processed:
-                from .tasks import process_inbox_thread
-                task_manager.add_task(
-                    task=process_inbox_thread,
-                    queue_name='completion',
-                    thread_id=message.thread_id
-                )
-
-            # And if the message hasn't been processed, generate an embedding for it
+            # If the message hasn't been processed, generate an embedding for it
             if not message.embedding_generated:
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
@@ -349,21 +350,21 @@ class Mailbox(SQLModel, table=True):
         """
         return general_context
 
-    def get_messages(self):
-        """Get all the messages in the mailbox."""
+    def get_threads(self):
+        """Get all the threads in the mailbox."""
         with Session(db_engine) as session:
-            messages = session.exec(
-                select(Message).where(Message.mailbox_id == self.id)
+            threads = session.exec(
+                select(Thread).where(Thread.mailbox_id == self.id)
             ).all()
 
         mailbox_data = {}
-        for message in messages:
-            mailbox_data[message.thread_id] = {
-                'id': message.id,
-                'message_type': message.message_type,
-                'summary': message.summary,
-                'selected_functions': message.selected_functions,
-                'executed_functions': message.executed_functions,
+        for thread in threads:
+            mailbox_data[thread.id] = {
+                'id': thread.id,
+                'category': thread.category,
+                'summary': thread.summary,
+                'selected_functions': thread.selected_functions,
+                'executed_functions': thread.executed_functions,
             }
         return mailbox_data
 
@@ -493,6 +494,8 @@ class Thread(SQLModel, table=True):
     mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
     mailbox: "Mailbox" = Relationship(back_populates='threads')
 
+    history_id: int
+
     processed: bool = SQLModelField(default=False, index=True)
 
     messages: list['Message'] = Relationship(
@@ -507,7 +510,6 @@ class Thread(SQLModel, table=True):
     category: ThreadCategory | None = SQLModelField(default=None, sa_column=Column(Enum(ThreadCategory)))
     summary: str | None = None
 
-    functions_analyzed: bool = SQLModelField(default=False)
     selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
     executed_functions: dict[str, ExecutedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
 
@@ -535,9 +537,15 @@ class Thread(SQLModel, table=True):
         """
 
         return thread_details
-
+    
     def analyze_and_process(self):
-        """Analyze and process the thread."""
+        """
+        Analyze and process this thread:
+        
+        - Categorize the thread
+        - Summarize the thread
+        - Select relevant Speck Functions for this thread
+        """
         # If this Thread has already been processed, do nothing
         if self.processed:
             return
@@ -548,18 +556,6 @@ class Thread(SQLModel, table=True):
             self.processed = True
             return
 
-        # Otherwise, we need to set the category, summary, and selected functions
-        self.set_category()
-        self.generate_summary()
-        self.select_functions()
-        self.processed = True
-
-    def set_category(self):
-        """Categorize the thread based on its contents."""
-        # If we already have a category, do nothing
-        if self.category is not None:
-            return
-
         prompt_template = """
         <context>
         {{ thread_details }}
@@ -567,86 +563,40 @@ class Thread(SQLModel, table=True):
         </context>
 
         <instructions>
-        {{ instructions }}
+        <overall-instructions>
+        Analyze this email thread from the user's inbox by completing three tasks: categorizing the thread, generating a short summary, and selecting relevant Speck Functions to execute.
+        </overall-instructions>
 
+        <task-one-categorize>
+        <task-instructions>
+        Categorize this email thread into one of the categories listed below. When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.
+        </task-instructions>
+        <category-descriptions>
         {% for category, description in category_descriptions.items() %}
-        "{{ category.value }}": {{ description }}
+        <category>
+        <name>
+        {{ category.value }}
+        </name>
+        <description>
+        {{ description }}
+        </description>
+        </category>
         {% endfor %}
-        </instructions>
-        """
+        </category-descriptions>
+        </task-one-categorize>
 
-        partial_variables = {
-            'instructions': 'Categorize this email thread into one of the categories listed below. When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.',
-            'category_descriptions': THREAD_CATEGORY_DESCRIPTIONS
-        }
+        <task-two-summarize>
+        <task-instructions>
+        Generate a short summary of this email thread. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.
+        </task-instructions>
+        </task-two-summarize>
 
-        class CategorizeThread(BaseModel):
-            category: ThreadCategory
-
-        input_variables = {
-            'general_context': self.mailbox.get_general_context(),
-            'thread_details': self.get_details()
-        }
-
-        result = generate_completion_with_validation(
-            prompt_template=prompt_template,
-            partial_variables=partial_variables,
-            input_variables=input_variables,
-            output_model=CategorizeThread,
-            llm_temperature=0
-        )
-
-        self.category = result.category
-
-    def generate_summary(self):
-        """Generate a summary for the thread."""
-        # If we already have a summary, do nothing
-        if self.summary is not None:
-            return
-
-        prompt_template = """
-        <context>
-        {{ thread_details }}
-        {{ general_context }}
-        </context>
-
-        <instructions>
-        {{ instructions }}
-        </instructions>
-        """
-
-        partial_variables = {
-            'instructions': 'Summarize this email thread into one phrase of maximum 80 characters. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.'
-        }
-
-        class ThreadSummary(BaseModel):
-            summary: str = Field(max_length=80)
-
-        input_variables = {
-            'general_context': self.mailbox.get_general_context(),
-            'thread_details': self.get_details()
-        }
-
-        result = generate_completion_with_validation(
-            prompt_template=prompt_template,
-            partial_variables=partial_variables,
-            input_variables=input_variables,
-            output_model=ThreadSummary
-        )
-
-        self.summary = result.summary
-
-    def select_functions(self):
-        """Analyzes this thread vs. the library of available Speck functions and selects the most relevant ones, if any, to surface to the user."""
-        # If we already have selected functions, do nothing
-        if self.functions_analyzed:
-            return
-
-        prompt_template = """
-        <context>
-        {{ thread_details }}
-        <speck-library>
-        {% for func_name, func_details in speck_library.functions.items() %}
+        <task-three-function-selection>
+        <task-instructions>
+        Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. For most threads, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck Function Library.
+        </task-instructions>
+        <speck-function-library>
+        {% for func_name, func_details in speck_function_library.functions.items() %}
         <speck-function>
         <name>
         {{ func_name }}
@@ -659,23 +609,21 @@ class Thread(SQLModel, table=True):
         </description>
         </speck-function>
         {% endfor %}
-        </speck-library>
-        {{ general_context }}
-        </context>
-
-        <instructions>
-        {{ instructions }}
+        </speck-function-library>
+        </task-three-function-selection>
         </instructions>
         """
 
         partial_variables = {
-            'instructions': "Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. Most of the time, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck library.",
-            'speck_library': speck_library
+            'category_descriptions': THREAD_CATEGORY_DESCRIPTIONS,
+            'speck_function_library': speck_library
         }
 
-        class SelectedFunctions(BaseModel):
+        class ThreadAnalysis(BaseModel):
+            category: ThreadCategory
+            summary: str = Field(max_length=80)
             no_functions_selected: bool = Field(default=True)
-            functions: Optional[List[SelectedFunction]] = None
+            selected_functions: Optional[List[SelectedFunction]] = None
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
@@ -686,14 +634,16 @@ class Thread(SQLModel, table=True):
             prompt_template=prompt_template,
             partial_variables=partial_variables,
             input_variables=input_variables,
-            output_model=SelectedFunctions,
+            output_model=ThreadAnalysis,
             llm_temperature=0
         )
 
-        if result.functions is not None:
-            self.selected_functions = {func.name: func.model_dump_json() for func in result.functions}
-        self.functions_analyzed = True
+        self.category = result.category
+        self.summary = result.summary
+        if result.selected_functions is not None:
+            self.selected_functions = {func.name: func.model_dump_json() for func in result.selected_functions}
 
+        self.processed = True
 
     def execute_function(self, function_name: str):
         """Execute a Speck Function based on this message."""
@@ -821,7 +771,7 @@ class VecMessage(SQLModel, table=True):
     NOTE: This is a virtual table that is created using the sqlite-vec extension,
     not by SQLModel.
     """
-    message_id: str | None = SQLModelField(default=None, primary_key=True)
+    message_id: str = SQLModelField(primary_key=True)
 
     body_embedding: bytes = SQLModelField(sa_column=Column(BLOB))
 

@@ -57,7 +57,7 @@ class Settings(BaseSettings):
         llamafiler_exe_path += '.exe'
 
     # Cloud vs. local completion
-    use_local_completions: bool = True
+    use_local_completions: bool = False
 
     # Cloud inference
     cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'

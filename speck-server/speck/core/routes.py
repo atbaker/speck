@@ -24,7 +24,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Send the latest Mailbox state upon initial connection
             # TODO: Enhance to support multiple mailboxes
             mailbox = session.exec(select(Mailbox)).one()
-            await event_manager.notify({ "type": "mailbox", "messages": mailbox.get_messages() })
+            await event_manager.notify({ "type": "mailbox", "threads": mailbox.get_threads() })
         except NoResultFound:
             # If we didn't find a Mailbox, then do nothing
             return
