@@ -376,6 +376,16 @@ class Mailbox(SQLModel, table=True):
         """
         return general_context
 
+    def get_thread(self, thread_id: str):
+        """Get the details of a thread."""
+        with Session(db_engine) as session:
+            thread = session.exec(select(Thread).where(Thread.mailbox_id == self.id, Thread.id == thread_id)).one()
+
+            # Access the thread's messages to avoid lazy loading errors
+            thread.messages
+
+        return thread
+
     def get_threads(self):
         """Get all the threads in the mailbox."""
         with Session(db_engine) as session:

@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (message.action === 'update_mailbox') {
             console.log('Updating mailbox:', message.mailbox);
             document.dispatchEvent(new CustomEvent('setMailbox', { detail: message.mailbox }));
+        } else if (message.action === 'update_thread_details') {
+            console.log('Updating thread details:', message.threadDetails);
+            document.dispatchEvent(new CustomEvent('setThreadDetails', { detail: message.threadDetails }));
         }
     });
 });
@@ -18,7 +21,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('threadData', () => ({
         threadId: 'Loading...',
         summary: 'Fetching summary...',
-        messageType: 'Unknown',
+        category: 'Unknown',
         mailbox: {},
         selectedFunctions: [],
         init() {
@@ -27,6 +30,9 @@ document.addEventListener('alpine:init', () => {
             });
             document.addEventListener('setMailbox', (event) => {
                 this.setMailbox(event.detail);
+            });
+            document.addEventListener('setThreadDetails', (event) => {
+                this.setThreadDetails(event.detail);
             });
         },
         setThreadId(newThreadId) {
@@ -38,10 +44,14 @@ document.addEventListener('alpine:init', () => {
             this.mailbox = newMailbox;
             this.updateDetails(this.threadId);
         },
+        setThreadDetails(threadDetails) {
+            this.summary = threadDetails ? threadDetails.summary : 'No summary available.';
+            this.category = threadDetails ? threadDetails.category : 'Unknown';
+        },
         updateDetails(threadId) {
-            const messageDetails = this.mailbox[threadId];
-            this.summary = messageDetails ? messageDetails.summary : 'No summary available.';
-            this.messageType = messageDetails ? messageDetails.message_type : 'Unknown';
+            chrome.runtime.sendMessage({ action: 'get_thread_details', threadId: threadId }, (response) => {
+                this.setThreadDetails(response);
+            });
         }
     }));
 });

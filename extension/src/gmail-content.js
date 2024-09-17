@@ -5,8 +5,8 @@ function sendThreadIdToBackground() {
     if (subjectElement) {
         const threadId = subjectElement.getAttribute('data-legacy-thread-id');
         if (threadId) {
-          console.log('Sending threadId to background:', threadId);
-          chrome.runtime.sendMessage({ action: 'set_thread_id', threadId: threadId });
+            console.log('Sending threadId to background:', threadId);
+            chrome.runtime.sendMessage({ action: 'set_thread_id', threadId: threadId });
         }
     }
 }

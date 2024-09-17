@@ -30,6 +30,10 @@ function connectWebSocket() {
       if (sidePanelPort) {
         sidePanelPort.postMessage({ action: 'update_mailbox', mailbox: mailbox_messages });
       }
+    } else if (data.type === 'thread_details') {
+      if (sidePanelPort) {
+        sidePanelPort.postMessage({ action: 'update_thread_details', threadDetails: data.threadDetails });
+      }
     }
   };
 
@@ -64,6 +68,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Broadcast the new thread ID to the side panel if it's open
     if (sidePanelPort) {
       sidePanelPort.postMessage({ action: 'update_thread_id', threadId: currentThreadId });
+    }
+  } else if (message.action === 'get_thread_details') {
+    const payload = {
+      action: 'get_thread_details',
+      threadId: message.threadId
+    };
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload));
+    } else {
+      console.error('WebSocket is not open');
     }
   }
 

@@ -32,8 +32,6 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            await websocket.send_text(f"Message text was: {data}")
-
             message = json.loads(data)
             action = message.get('action')
 
@@ -47,6 +45,34 @@ async def websocket_endpoint(websocket: WebSocket):
                     thread_id=thread_id,
                     function_name=function_name
                 )
+                await websocket.send_text(f"Function {function_name} scheduled for thread {thread_id}.")
+
+            elif action == 'get_thread_details':
+                thread_id = message.get('threadId')
+                if thread_id:
+                    try:
+                        mailbox = session.exec(select(Mailbox)).one()
+                        thread = mailbox.get_thread(thread_id)
+                        thread_data = {
+                            "threadId": thread.id,
+                            "summary": thread.summary,
+                            "category": thread.category
+                        }
+                        await websocket.send_text(json.dumps({
+                            "type": "thread_details",
+                            "threadDetails": thread_data
+                        }))
+                    except NoResultFound:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": f"Thread with ID {thread_id} not found."
+                        }))
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "No threadId provided in the request."
+                    }))
 
     except WebSocketDisconnect:
         event_manager.disconnect(websocket)
+        logger.info("WebSocket disconnected")
