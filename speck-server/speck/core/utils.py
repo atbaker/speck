@@ -7,7 +7,7 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
-from sqlmodel import SQLModel, Session, select, text
+from sqlmodel import SQLModel, Session, delete, select, text
 
 from config import db_engine, settings
 
@@ -65,8 +65,8 @@ def generate_completion_with_validation(
 
     llm = ChatOpenAI(
         base_url=base_url,
-        model=settings.cloud_inference_model,
         openai_api_key=settings.cloud_inference_api_key,
+        model=settings.cloud_inference_model,
         temperature=llm_temperature
     )
 
@@ -165,16 +165,8 @@ def reset_database():
             mailbox.last_synced_at = None
             session.add(mailbox)
 
-        messages = session.exec(select(Message)).all()
-        for message in messages:
-            session.delete(message)
-
-        vec_messages = session.exec(select(VecMessage)).all()
-        for vec_message in vec_messages:
-            session.delete(vec_message)
-
-        threads = session.exec(select(Thread)).all()
-        for thread in threads:
-            session.delete(thread)
+        session.exec(delete(VecMessage))
+        session.exec(delete(Message))
+        session.exec(delete(Thread))
 
         session.commit()

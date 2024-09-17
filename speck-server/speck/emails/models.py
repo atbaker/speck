@@ -63,8 +63,13 @@ class Mailbox(SQLModel, table=True):
         last_synced_at = pendulum.now('utc')
 
         # First, get the threads ids for all threads in the user's inbox
-        response = client.users().threads().list(userId='me', labelIds=['INBOX']).execute()
-        thread_ids.update([thread['id'] for thread in response['threads']])
+        while True:
+            response = client.users().threads().list(userId='me', labelIds=['INBOX'], maxResults=500).execute()
+            thread_ids.update([thread['id'] for thread in response['threads']])
+            if 'nextPageToken' not in response:
+                break
+            next_page_token = response['nextPageToken']
+            logging.info(f"Fetched {len(thread_ids)} inbox threads so far, fetching next page...")
 
         # Next, fetch all threads with messages received in the past 31 days
         after_date = pendulum.now('utc').subtract(days=32) # 32 to be safe
@@ -75,7 +80,7 @@ class Mailbox(SQLModel, table=True):
             if 'nextPageToken' not in response:
                 break
             next_page_token = response['nextPageToken']
-            logging.info(f"Fetched {len(thread_ids)} threads so far, fetching next page...")
+            logging.info(f"Fetched {len(thread_ids)} non-inbox threads so far, fetching next page...")
 
         # Sync each Thread, which will also sync all of its Messages, keeping
         # track of the most recent history_id
@@ -89,7 +94,7 @@ class Mailbox(SQLModel, table=True):
             # longer in our set, using a subquery because VecMessage doesn't
             # have a thread_id field
             subquery = select(Message.id).where(Message.thread_id.not_in(thread_ids))
-            session.exec(delete(VecMessage).where(VecMessage.message_id == subquery.c.id))
+            session.exec(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
             session.exec(delete(Message).where(Message.thread_id.not_in(thread_ids)))
             session.exec(delete(Thread).where(Thread.id.not_in(thread_ids)))
 
@@ -215,7 +220,22 @@ class Mailbox(SQLModel, table=True):
 
         # Get this Thread from the Gmail API
         logging.info(f"Fetching thread {thread_id} from Gmail")
-        response = client.users().threads().get(userId='me', id=thread_id, format='minimal').execute()
+        try:
+            response = client.users().threads().get(userId='me', id=thread_id, format='minimal').execute()
+        except GoogleApiHttpError as e:
+            if e.status_code == 404:
+                logging.info(f"Thread {thread_id} has been deleted from the user's mailbox")
+
+                # Delete this Thread and its VecMessages and Messages (if any) from the database
+                with Session(db_engine) as session:
+                    subquery = select(Message.id).where(Message.thread_id == thread_id)
+                    session.exec(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
+                    session.exec(delete(Message).where(Message.thread_id == thread_id))
+                    session.exec(delete(Thread).where(Thread.id == thread_id))
+
+                return
+            else:
+                raise e
 
         # Set the history_id on the Thread
         thread.history_id = response['historyId']
@@ -279,7 +299,13 @@ class Mailbox(SQLModel, table=True):
             # If the error is a 404, then the message has been deleted from the
             # user's mailbox and we don't need to sync it
             if e.status_code == 404:
-                logging.info(f"Message {message_id} has been deleted from the user's mailbox, skipping")
+                logging.info(f"Message {message_id} has been deleted from the user's mailbox")
+
+                # Delete the Message and its VecMessage from the database
+                with Session(db_engine) as session:
+                    session.exec(delete(VecMessage).where(VecMessage.message_id == message_id))
+                    session.exec(delete(Message).where(Message.id == message_id))
+
                 return
             else:
                 raise e
@@ -302,7 +328,7 @@ class Mailbox(SQLModel, table=True):
         # Update the fields on the Message
         message.history_id = response['historyId']
         message.thread_id = response['threadId']
-        message.label_ids = response.get('labelIds', [])
+        message.label_ids = response['labelIds']
         message.from_ = email_message['From']
         message.to = to_recipients
         message.cc = cc_recipients

@@ -195,7 +195,6 @@ class TaskManager:
                     task_name = parent_conn.recv()
 
                     if task_name in ("process_inbox_thread", "execute_function_for_message"):
-                        self.logger.info('Pushing mailbox state to event system')
                         from emails.models import Mailbox
                         with Session(db_engine) as session:
                             mailbox = session.exec(select(Mailbox)).one()
