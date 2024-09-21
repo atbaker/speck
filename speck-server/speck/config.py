@@ -61,14 +61,14 @@ class Settings(BaseSettings):
 
     # Cloud inference
     # CUDO VM
-    cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'
-    cloud_inference_api_key: str = os.environ['VLLM_API_KEY'] # TODO: Will eventually connect via a cloud-hosted proxy instead of directly to VLLM
-    cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
+    # cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'
+    # cloud_inference_api_key: str = os.environ['VLLM_API_KEY'] # TODO: Will eventually connect via a cloud-hosted proxy instead of directly to VLLM
+    # cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
 
     # Cerebras
-    # cloud_inference_endpoint: str = 'https://api.cerebras.ai/v1'
-    # cloud_inference_api_key: str = os.environ['CEREBRAS_API_KEY']
-    # cloud_inference_model: str = 'llama3.1-70b'
+    cloud_inference_endpoint: str = 'https://api.cerebras.ai/v1'
+    cloud_inference_api_key: str = os.environ['CEREBRAS_API_KEY']
+    cloud_inference_model: str = 'llama3.1-70b'
 
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
