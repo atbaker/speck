@@ -154,6 +154,7 @@ def create_database_tables():
 
     # Create the database tables
     from emails import models as email_models
+    from chat import models as chat_models
     from profiles import models as profile_models
     SQLModel.metadata.create_all(db_engine)
 
