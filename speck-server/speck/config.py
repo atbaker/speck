@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     log_dir: str = os.path.join(app_data_dir, 'logs')
 
     # Database
-    database_url: str = f'sqlite:///{os.path.join(speck_data_dir, "speck.db")}'
+    database_path: str = os.path.join(speck_data_dir, "speck.db")
 
     # Cache
     cache_dir: str = os.path.join(speck_data_dir, 'cache')
@@ -60,15 +60,23 @@ class Settings(BaseSettings):
     use_local_completions: bool = False
 
     # Cloud inference
-    # CUDO VM
-    # cloud_inference_endpoint: str = 'https://crom.myspeck.ai/v1'
-    # cloud_inference_api_key: str = os.environ['VLLM_API_KEY'] # TODO: Will eventually connect via a cloud-hosted proxy instead of directly to VLLM
-    # cloud_inference_model: str = 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
-
-    # Cerebras
-    cloud_inference_endpoint: str = 'https://api.cerebras.ai/v1'
-    cloud_inference_api_key: str = os.environ['CEREBRAS_API_KEY']
-    cloud_inference_model: str = 'llama3.1-70b'
+    cloud_inference_providers: dict = {
+        'cudo': {
+            'endpoint': 'https://crom.myspeck.ai/v1',
+            'api_key': os.environ['VLLM_API_KEY'],
+            'model': 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
+        },
+        'cerebras': {
+            'endpoint': 'https://api.cerebras.ai/v1',
+            'api_key': os.environ['CEREBRAS_API_KEY'],
+            'model': 'llama3.1-70b'
+        },
+        'fireworks': {
+            'endpoint': 'https://api.fireworks.ai/inference/v1',
+            'api_key': os.environ['FIREWORKS_API_KEY'],
+            'model': 'accounts/fireworks/models/llama-v3p1-70b-instruct'
+        }
+    }
 
     # Google OAuth
     gcp_client_id: str = '967796201989-uuj3ieb0dpijshemdt33umac2vl2o914.apps.googleusercontent.com'
@@ -87,7 +95,7 @@ os.makedirs(settings.speck_data_dir, exist_ok=True)
 os.makedirs(settings.log_dir, exist_ok=True)
 
 # SQLModel
-db_engine = create_engine(settings.database_url)
+db_engine = create_engine('sqlite:///' + settings.database_path)
 
 def get_db_session():
     with Session(db_engine) as session:

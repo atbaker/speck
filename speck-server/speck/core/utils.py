@@ -60,13 +60,18 @@ def generate_completion_with_validation(
     # Set our base_url for local or cloud completions
     if settings.use_local_completions:
         base_url = 'http://127.0.0.1:17727/v1'
+        api_key = 'not-necessary-for-local-completions'
+        model = None
     else:
-        base_url = settings.cloud_inference_endpoint
+        provider_settings = settings.cloud_inference_providers['fireworks']
+        base_url = provider_settings['endpoint']
+        api_key = provider_settings['api_key']
+        model = provider_settings['model']
 
     llm = ChatOpenAI(
         base_url=base_url,
-        openai_api_key=settings.cloud_inference_api_key,
-        model=settings.cloud_inference_model,
+        openai_api_key=api_key,
+        model=model,
         temperature=llm_temperature
     )
 
@@ -158,15 +163,21 @@ def reset_database():
     """
     from emails.models import Mailbox, Message, VecMessage, Thread
     with Session(db_engine) as session:
-        # Just reset the Mailbox's sync fields for now
+        # Keep the Mailbox but reset the sync fields
         mailboxes = session.exec(select(Mailbox)).all()
         for mailbox in mailboxes:
             mailbox.last_history_id = None
             mailbox.last_synced_at = None
             session.add(mailbox)
 
+        # Delete all VecMessage, Message, and Thread rows
         session.exec(delete(VecMessage))
         session.exec(delete(Message))
         session.exec(delete(Thread))
+
+        # The LangGraph SQLite checkpointer creates additional tables we need
+        # to delete manually
+        session.exec(text("DROP TABLE IF EXISTS writes"))
+        session.exec(text("DROP TABLE IF EXISTS checkpoints"))
 
         session.commit()

@@ -1,4 +1,6 @@
 ### speck-app
+extension/src/styles/tailwind.build.css
+
 speck-server/data
 speck-server/speck/llamafile
 speck-server/speck/llamafiler

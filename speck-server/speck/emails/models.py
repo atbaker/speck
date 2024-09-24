@@ -404,6 +404,13 @@ class Mailbox(SQLModel, table=True):
             }
         return mailbox_data
 
+    def list_threads(self, max_results: int = 100):
+        """List the threads in the mailbox."""
+        with Session(db_engine) as session:
+            threads = session.exec(select(Thread).where(Thread.mailbox_id == self.id).order_by(Thread.history_id.desc()).limit(max_results)).all()
+
+        return threads
+
     def search_embeddings(self, query: str, k: int = 10):
         """Search the mailbox's embeddings for a query."""
         # Generate an embedding for the query

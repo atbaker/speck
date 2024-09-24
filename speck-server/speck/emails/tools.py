@@ -8,40 +8,21 @@ from sqlalchemy.exc import NoResultFound
 from sqlmodel import Session, select
 
 from config import db_engine
-from .models import Mailbox, Message
+from .models import Mailbox
 
 
-class CalculatorInput(BaseModel):
-    a: int = Field(description="first number")
-    b: int = Field(description="second number")
+class ListThreadsInput(BaseModel):
+    include_body: Optional[bool] = Field(default=False, description="If true, the full body of each message will be included in the output")
+    max_results: int = Field(default=5, ge=1, le=100, description="The maximum number of threads to retrieve, up to 100")
 
 
-class CustomCalculatorTool(BaseTool):
-    name: str = "Calculator"
-    description: str = "A very simple calculator. Input two numbers and get the result of their addition."
-    args_schema: Type[BaseModel] = CalculatorInput
-    return_direct: bool = True
-
-    def _run(
-        self, a: int, b: int, run_manager: Optional[CallbackManagerForToolRun] = None
-    ) -> str:
-        """Use the tool."""
-        return {
-            'output': a + b
-        }
-    
-
-class RecentEmailsInput(BaseModel):
-    limit: int = Field(description="The number of recent emails to retrieve")
-
-
-class RecentEmailsTool(BaseTool):
-    name: str = "RecentEmails"
-    description: str = "Get the most recently received emails from the user's Gmail mailbox. Limit the number of emails to the specified number."
-    args_schema: Type[BaseModel] = RecentEmailsInput
+class ListThreadsTool(BaseTool):
+    name: str = "ListThreads"
+    description: str = "List threads in the user's Gmail mailbox, filtered by the specified criteria. Threads are returned in descending order based on the date they were last updated."
+    args_schema: Type[BaseModel] = ListThreadsInput
 
     def _run(
-        self, limit: int, run_manager: Optional[CallbackManagerForToolRun] = None
+        self, include_body: bool, max_results: int, run_manager: Optional[CallbackManagerForToolRun] = None
     ) -> str:
         """Use the tool."""
         with Session(db_engine) as session:
@@ -51,9 +32,30 @@ class RecentEmailsTool(BaseTool):
                 # If we didn't find a Mailbox, then return an error
                 raise ToolException('No mailbox found')
             
-            messages = session.exec(select(Message).where(Message.mailbox_id == mailbox.id).order_by(Message.created_at.desc()).limit(limit)).all()
+            threads = mailbox.list_threads(max_results=max_results)
+
+        results = []
+        for thread in threads:
+            results.append({
+                'id': thread.id,
+                'category': thread.category,
+                'summary': thread.summary,
+                'messages': [
+                    {
+                        'id': message.id,
+                        'label_ids': message.label_ids,
+                        'from': message.from_,
+                        'to': message.to,
+                        'cc': message.cc,
+                        'bcc': message.bcc,
+                        'subject': message.subject,
+                        'received_at': message.received_at,
+                        'body': message.body if include_body else None
+                    }
+                    for message in thread.messages
+                ]
+            })
 
         return {
-            'output': messages
+            'output': results
         }
-

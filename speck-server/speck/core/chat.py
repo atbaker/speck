@@ -1,15 +1,15 @@
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
 
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage, trim_messages
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from emails.tools import CustomCalculatorTool, RecentEmailsTool
+from emails.tools import ListThreadsTool
+from config import settings
 
 
 class State(TypedDict):
@@ -18,21 +18,14 @@ class State(TypedDict):
 
 graph_builder = StateGraph(State)
 
-search_tool = TavilySearchResults(max_results=5)
-calculator_tool = CustomCalculatorTool()
-recent_emails_tool = RecentEmailsTool()
-tools = [search_tool, calculator_tool, recent_emails_tool]
-# llm = ChatOpenAI(
-#     base_url='https://api.cerebras.ai/v1',
-#     openai_api_key=os.environ['CEREBRAS_API_KEY'],
-#     model='llama3.1-70b',
-#     temperature=0,
-# )
-import os
+list_threads_tool = ListThreadsTool()
+tools = [list_threads_tool]
+
+provider_settings = settings.cloud_inference_providers['fireworks']
 llm = ChatOpenAI(
-    base_url='https://api.fireworks.ai/inference/v1',
-    openai_api_key=os.environ['FIREWORKS_API_KEY'],
-    model='accounts/fireworks/models/llama-v3p1-70b-instruct',
+    base_url=provider_settings['endpoint'],
+    openai_api_key=provider_settings['api_key'],
+    model=provider_settings['model'],
     temperature=0,
 )
 llm_with_tools = llm.bind_tools(tools)
@@ -50,12 +43,11 @@ def should_continue(state: State):
         return 'tools'
 
     # Otherwise, check if we need to summarize the conversation
-    # TODO: Check this based on token count / message length instead
-    # If there are more than 5 messages, summarize the conversation
-    if len(messages) > 5:
-        return 'summarize'
-    else:
-        return END
+    # TODO: Don't summarize for now, will add back in later
+    # if len(messages) > 5:
+    #     return 'summarize'
+    # else:
+    return END
 
 def invoke_llm_with_summary(state: State):
     # If a summary exists, add it as a system message
@@ -103,11 +95,10 @@ graph_builder.add_conditional_edges(
 )
 graph_builder.add_edge("tools", "conversation")
 
-memory = MemorySaver() # TODO: Change to SQLite checkpointer
-graph = graph_builder.compile(checkpointer=memory)
-
 config = {"configurable": {"thread_id": "1"}} # TODO: Track thread_id in the frontend
 
 def process_user_message(user_message: str):
-    response = graph.invoke({"messages": [("user", user_message)]}, config)
+    with SqliteSaver.from_conn_string(settings.database_path) as sqlite_checkpointer:
+        graph = graph_builder.compile(checkpointer=sqlite_checkpointer)
+        response = graph.invoke({"messages": [("user", user_message)]}, config)
     import pdb; pdb.set_trace()
