@@ -3,7 +3,8 @@ import logging
 import json
 from typing import List
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Session, select
+from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from config import db_engine
 from core.event_manager import event_manager
@@ -23,7 +24,7 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             # Send the latest Mailbox state upon initial connection
             # TODO: Enhance to support multiple mailboxes
-            mailbox = session.exec(select(Mailbox)).one()
+            mailbox = session.execute(select(Mailbox)).scalar_one()
             await event_manager.notify({ "type": "mailbox", "threads": mailbox.get_threads() })
         except NoResultFound:
             # If we didn't find a Mailbox, then do nothing
@@ -51,7 +52,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 thread_id = message.get('threadId')
                 if thread_id:
                     try:
-                        mailbox = session.exec(select(Mailbox)).one()
+                        mailbox = session.execute(select(Mailbox)).scalar_one()
                         thread = mailbox.get_thread(thread_id)
                         thread_data = {
                             "threadId": thread.id,

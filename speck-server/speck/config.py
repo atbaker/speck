@@ -3,8 +3,8 @@ import os
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
 import platform
 from pydantic_settings import BaseSettings
-from sqlalchemy import event
-from sqlmodel import Session, create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session
 import sqlite_vec
 import sys
 

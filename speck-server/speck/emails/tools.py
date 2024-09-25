@@ -4,8 +4,10 @@ from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.tools import BaseTool, ToolException
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Session, select
+# from sqlmodel import Session, select
 
 from config import db_engine
 from .models import Mailbox
@@ -27,7 +29,7 @@ class ListThreadsTool(BaseTool):
         """Use the tool."""
         with Session(db_engine) as session:
             try:
-                mailbox = session.exec(select(Mailbox)).one()
+                mailbox = session.execute(select(Mailbox)).scalar_one()
             except NoResultFound:
                 # If we didn't find a Mailbox, then return an error
                 raise ToolException('No mailbox found')

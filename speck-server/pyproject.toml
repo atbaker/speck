@@ -27,8 +27,8 @@ playwright = "^1.45.0"
 psutil = "^6.0.0"
 pydantic = "^2.8.2"
 pydantic-settings = "^2.3.4"
+sqlalchemy = "^2.0.35"
 sqlite-vec = "^0.1.1"
-sqlmodel = "^0.0.21"
 uvicorn = "^0.30.3"
 
 

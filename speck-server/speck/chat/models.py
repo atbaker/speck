@@ -17,7 +17,7 @@ class Conversation(SQLModel, table=True):
     id: int | None = SQLModelField(default=None, primary_key=True)
 
     mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
-    mailbox: "Mailbox" = Relationship(back_populates='conversations')
+    # mailbox: "Mailbox" = Relationship(back_populates='conversations')
 
     messages: list[Message] = SQLModelField(sa_column=Column(JSON))
 

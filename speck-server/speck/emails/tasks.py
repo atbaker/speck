@@ -1,7 +1,9 @@
 import logging
 import pendulum
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Session, select
+# from sqlmodel import Session, select
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 
 from config import db_engine
@@ -19,7 +21,7 @@ def sync_inbox():
     with Session(db_engine) as session:
         try:
             # TODO: Enhance to support multiple mailboxes
-            mailbox = session.exec(select(Mailbox)).one()
+            mailbox = session.execute(select(Mailbox)).scalar_one()
         except NoResultFound:
             # If we didn't find a Mailbox, then do nothing
             return
@@ -37,7 +39,7 @@ def process_inbox_thread(thread_id: int):
     """
     with Session(db_engine) as session:
         try:
-            thread = session.exec(select(Thread).where(Thread.id == thread_id)).one()
+            thread = session.execute(select(Thread).where(Thread.id == thread_id)).scalar_one()
             thread.mailbox
         except NoResultFound:
             # If we didn't find a Message, then do nothing
@@ -54,7 +56,7 @@ def generate_embedding_for_message(message_id: int):
     Generate an embedding for a given message.
     """
     with Session(db_engine) as session:
-        message = session.exec(select(Message).where(Message.id == message_id)).one()
+        message = session.execute(select(Message).where(Message.id == message_id)).scalar_one()
 
     message.generate_embedding()
 
@@ -67,7 +69,7 @@ def execute_function_for_message(
     """
     with Session(db_engine) as session:
         try:
-            message = session.exec(select(Message).where(Message.thread_id == thread_id)).one()
+            message = session.execute(select(Message).where(Message.thread_id == thread_id)).scalar_one()
         except NoResultFound:
             raise ValueError(f"Message {thread_id} not found, cannot execute function {function_name}")
 

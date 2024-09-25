@@ -8,14 +8,15 @@ import html2text
 import logging
 import pendulum
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import Boolean, Enum, ForeignKey, DateTime, Integer, String, select, delete, text
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy.orm import declared_attr
+from sqlalchemy.orm import Mapped, mapped_column, relationship, Session
 from sqlite_vec import serialize_float32
-from sqlmodel import Column, Enum, Field as SQLModelField, Session, SQLModel, Relationship, select, delete, text, bindparam, BLOB
 from typing import List, Literal, Optional
 
 from config import db_engine
+from core.models import Base
 from core.utils import generate_embedding, generate_completion_with_validation
 from core.task_manager import task_manager
 from library import speck_library, FunctionResult
@@ -25,24 +26,27 @@ from .utils import get_gmail_api_client
 logger = logging.getLogger(__name__)
 
 
-class Mailbox(SQLModel, table=True):
-    id: int | None = SQLModelField(default=None, primary_key=True)
+class Mailbox(Base):
+    __tablename__ = 'mailbox'
 
-    email_address: str = SQLModelField(unique=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
 
-    last_history_id: int | None = None
-    last_synced_at: datetime | None = None
+    email_address: Mapped[str] = mapped_column(String(60), unique=True)
 
-    threads: list['Thread'] = Relationship(
+    last_history_id: Mapped[Optional[int]] = mapped_column(Integer, default=None)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=None)
+
+    threads: Mapped[list['Thread']] = relationship(
         back_populates='mailbox',
-        cascade_delete=True
-    )
-    messages: list['Message'] = Relationship(
-        back_populates='mailbox',
-        cascade_delete=True
+        cascade='all, delete'
     )
 
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
+    messages: Mapped[list['Message']] = relationship(
+        back_populates='mailbox',
+        cascade='all, delete'
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     # profile: Optional["Profile"] = Relationship(back_populates="mailbox", sa_relationship_kwargs={"uselist": False})
 
@@ -93,10 +97,10 @@ class Mailbox(SQLModel, table=True):
             # Delete old Message, VecMessage, and Thread objects which are no
             # longer in our set, using a subquery because VecMessage doesn't
             # have a thread_id field
-            subquery = select(Message.id).where(Message.thread_id.not_in(thread_ids))
-            session.exec(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
-            session.exec(delete(Message).where(Message.thread_id.not_in(thread_ids)))
-            session.exec(delete(Thread).where(Thread.id.not_in(thread_ids)))
+            # subquery = select(Message.id).where(Message.thread_id.not_in(thread_ids))
+            # session.execute(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
+            session.execute(delete(Message).where(Message.thread_id.not_in(thread_ids)))
+            session.execute(delete(Thread).where(Thread.id.not_in(thread_ids)))
 
             # Update the Mailbox's last_history_id and last_synced_at
             self.last_history_id = most_recent_history_id
@@ -106,7 +110,7 @@ class Mailbox(SQLModel, table=True):
 
             # Also schedule a task to update the Profile if it's not complete
             from profiles.models import Profile
-            profile = session.exec(select(Profile)).one() # TODO: Multiple profiles
+            profile = session.execute(select(Profile)).scalar_one() # TODO: Multiple profiles
             if not profile.complete:
                 from profiles.tasks import update_profile
                 # TODO: Reenable later
@@ -128,9 +132,9 @@ class Mailbox(SQLModel, table=True):
         # Before we begin this new sync, check if any of our existing Threads
         # and Messages are unprocessed
         with Session(db_engine) as session:
-            unprocessed_threads = session.exec(
+            unprocessed_threads = session.execute(
                 select(Thread).where(Thread.processed == False)
-            ).all()
+            ).scalars().all()
             for thread in unprocessed_threads:
                 from .tasks import process_inbox_thread
                 task_manager.add_task(
@@ -139,9 +143,9 @@ class Mailbox(SQLModel, table=True):
                     thread_id=thread.id
                 )
 
-            unprocessed_messages = session.exec(
+            unprocessed_messages = session.execute(
                 select(Message).where(Message.embedding_generated == False)
-            ).all()
+            ).scalars().all()
             for message in unprocessed_messages:
                 from .tasks import generate_embedding_for_message
                 task_manager.add_task(
@@ -214,7 +218,7 @@ class Mailbox(SQLModel, table=True):
         with Session(db_engine) as session:
             try:
                 statement = select(Thread).where(Thread.id == thread_id, Thread.mailbox_id == self.id)
-                thread = session.exec(statement).one()
+                thread = session.execute(statement).scalar_one()
             except NoResultFound:
                 thread = Thread(id=thread_id, mailbox_id=self.id)
 
@@ -228,10 +232,10 @@ class Mailbox(SQLModel, table=True):
 
                 # Delete this Thread and its VecMessages and Messages (if any) from the database
                 with Session(db_engine) as session:
-                    subquery = select(Message.id).where(Message.thread_id == thread_id)
-                    session.exec(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
-                    session.exec(delete(Message).where(Message.thread_id == thread_id))
-                    session.exec(delete(Thread).where(Thread.id == thread_id))
+                    # subquery = select(Message.id).where(Message.thread_id == thread_id)
+                    # session.execute(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
+                    session.execute(delete(Message).where(Message.thread_id == thread_id))
+                    session.execute(delete(Thread).where(Thread.id == thread_id))
 
                 return
             else:
@@ -247,7 +251,7 @@ class Mailbox(SQLModel, table=True):
 
         with Session(db_engine) as session:
             # Delete any Messages which used to be in the Thread but aren't anymore
-            session.exec(
+            session.execute(
                 delete(Message).where(
                     Message.thread_id == thread_id,
                     Message.id.not_in(thread_message_ids)
@@ -284,7 +288,7 @@ class Mailbox(SQLModel, table=True):
                     Message.id == message_id,
                     Message.mailbox_id == self.id
                 )
-                message = session.exec(statement).one()
+                message = session.execute(statement).scalar_one()
             except NoResultFound:
                 message = Message(
                     id=message_id,
@@ -303,8 +307,8 @@ class Mailbox(SQLModel, table=True):
 
                 # Delete the Message and its VecMessage from the database
                 with Session(db_engine) as session:
-                    session.exec(delete(VecMessage).where(VecMessage.message_id == message_id))
-                    session.exec(delete(Message).where(Message.id == message_id))
+                    # session.execute(delete(VecMessage).where(VecMessage.message_id == message_id))
+                    session.execute(delete(Message).where(Message.id == message_id))
 
                 return
             else:
@@ -379,7 +383,9 @@ class Mailbox(SQLModel, table=True):
     def get_thread(self, thread_id: str):
         """Get the details of a thread."""
         with Session(db_engine) as session:
-            thread = session.exec(select(Thread).where(Thread.mailbox_id == self.id, Thread.id == thread_id)).one()
+            thread = session.execute(
+                select(Thread).where(Thread.mailbox_id == self.id, Thread.id == thread_id)
+            ).scalar_one()
 
             # Access the thread's messages to avoid lazy loading errors
             thread.messages
@@ -389,9 +395,9 @@ class Mailbox(SQLModel, table=True):
     def get_threads(self):
         """Get all the threads in the mailbox."""
         with Session(db_engine) as session:
-            threads = session.exec(
+            threads = session.execute(
                 select(Thread).where(Thread.mailbox_id == self.id)
-            ).all()
+            ).scalars().all()
 
         mailbox_data = {}
         for thread in threads:
@@ -407,7 +413,9 @@ class Mailbox(SQLModel, table=True):
     def list_threads(self, max_results: int = 100):
         """List the threads in the mailbox."""
         with Session(db_engine) as session:
-            threads = session.exec(select(Thread).where(Thread.mailbox_id == self.id).order_by(Thread.history_id.desc()).limit(max_results)).all()
+            threads = session.execute(
+                select(Thread).where(Thread.mailbox_id == self.id).order_by(Thread.history_id.desc()).limit(max_results)
+            ).scalars().all()
 
         return threads
 
@@ -419,18 +427,20 @@ class Mailbox(SQLModel, table=True):
 
         # Run the query against the VecMessage table to find the 10 most similar messages
         with Session(db_engine) as session:
-            results = session.exec(text(
+            results = session.execute(text(
                 'select * from vec_message where body_embedding match :query_embedding limit :k'
             ).bindparams(
                 query_embedding=serialized_query_embedding,
                 k=k
-            )).all()
+            )).scalars().all()
 
             # Get the message_ids from the results
             message_ids = [message_id for message_id, embedding in results]
 
             # Get the messages from the Message table
-            messages = session.exec(select(Message).where(Message.id.in_(message_ids))).all()
+            messages = session.execute(
+                select(Message).where(Message.id.in_(message_ids))
+            ).scalars().all()
 
         return messages
 
@@ -531,32 +541,32 @@ class ExecutedFunction(BaseModel):
     status: Literal['pending', 'success', 'error'] = 'pending'
     result: FunctionResult | None = None
 
-class Thread(SQLModel, table=True):
-    id: str | None = SQLModelField(default=None, primary_key=True)
+class Thread(Base):
+    __tablename__ = 'thread'
 
-    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
-    mailbox: "Mailbox" = Relationship(back_populates='threads')
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
 
-    history_id: int
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailbox.id'))
+    mailbox: Mapped["Mailbox"] = relationship(back_populates='threads')
 
-    processed: bool = SQLModelField(default=False, index=True)
+    history_id: Mapped[int] = mapped_column(Integer)
 
-    messages: list['Message'] = Relationship(
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    messages: Mapped[list["Message"]] = relationship(
         back_populates='thread',
-        cascade_delete=True,
-        sa_relationship_kwargs={
-            'lazy': 'subquery',
-            'order_by': 'desc(Message.received_at)'
-        }
+        cascade='all, delete',
+        lazy='subquery',
+        order_by='desc(Message.received_at)'
     )
 
-    category: ThreadCategory | None = SQLModelField(default=None, sa_column=Column(Enum(ThreadCategory)))
-    summary: str | None = None
+    category: Mapped[Optional[ThreadCategory]] = mapped_column(Enum(ThreadCategory))
+    summary: Mapped[Optional[str]] = mapped_column(String(80))
 
-    selected_functions: dict[str, SelectedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
-    executed_functions: dict[str, ExecutedFunction] = SQLModelField(default_factory=dict, sa_column=Column(JSON))
+    selected_functions: Mapped[dict[str, SelectedFunction]] = mapped_column(JSON, default=dict)
+    executed_functions: Mapped[dict[str, ExecutedFunction]] = mapped_column(JSON, default=dict)
 
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     @property
     def in_inbox(self):
@@ -716,31 +726,33 @@ class Thread(SQLModel, table=True):
             executed_function.id: executed_function.model_dump_json()
         }
 
-class Message(SQLModel, table=True):
-    id: str | None = SQLModelField(default=None, primary_key=True)
+class Message(Base):
+    __tablename__ = 'message'
 
-    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id', ondelete='CASCADE')
-    mailbox: "Mailbox" = Relationship(back_populates='messages')
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
 
-    raw: str
-    history_id: int
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailbox.id'))
+    mailbox: Mapped["Mailbox"] = relationship(back_populates='messages')
 
-    thread_id: str = SQLModelField(default=None, foreign_key='thread.id', ondelete='CASCADE')
-    thread: "Thread" = Relationship(back_populates='messages')
+    raw: Mapped[str] = mapped_column(String)
+    history_id: Mapped[int] = mapped_column(Integer)
 
-    label_ids: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    thread_id: Mapped[str] = mapped_column(ForeignKey('thread.id'))
+    thread: Mapped["Thread"] = relationship(back_populates='messages')
 
-    from_: str
-    to: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    cc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    bcc: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
-    subject: str
-    received_at: datetime
-    body: str
+    label_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
 
-    embedding_generated: bool = SQLModelField(default=False, index=True)
+    from_: Mapped[str] = mapped_column(String)
+    to: Mapped[list[str]] = mapped_column(JSON, default=list)
+    cc: Mapped[list[str]] = mapped_column(JSON, default=list)
+    bcc: Mapped[list[str]] = mapped_column(JSON, default=list)
+    subject: Mapped[str] = mapped_column(String)
+    received_at: Mapped[datetime] = mapped_column(DateTime)
+    body: Mapped[str] = mapped_column(String)
 
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
+    embedding_generated: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     @property
     def in_inbox(self):
@@ -769,6 +781,9 @@ class Message(SQLModel, table=True):
 
     def generate_embedding(self):
         """Generate an embedding for the message."""
+        # TODO: Re-enable embeddings later
+        return
+
         # If this message has a blank body, we don't need to generate an embedding
         if not self.body:
             with Session(db_engine) as session:
@@ -780,7 +795,9 @@ class Message(SQLModel, table=True):
         # Check if we already have an embedding
         with Session(db_engine) as session:
             try:
-                session.exec(select(VecMessage).where(VecMessage.message_id == self.id)).one()
+                session.execute(
+                    select(VecMessage).where(VecMessage.message_id == self.id)
+                ).scalar_one()
 
                 # If we do, return
                 return
@@ -807,17 +824,17 @@ class Message(SQLModel, table=True):
 
             session.commit()
 
-class VecMessage(SQLModel, table=True):
-    """
-    A virtual table that stores the embeddings of the messages.
+# class VecMessage(SQLModel, table=True):
+#     """
+#     A virtual table that stores the embeddings of the messages.
 
-    NOTE: This is a virtual table that is created using the sqlite-vec extension,
-    not by SQLModel.
-    """
-    message_id: str = SQLModelField(primary_key=True)
+#     NOTE: This is a virtual table that is created using the sqlite-vec extension,
+#     not by SQLModel.
+#     """
+#     message_id: str = SQLModelField(primary_key=True)
 
-    body_embedding: bytes = SQLModelField(sa_column=Column(BLOB))
+#     body_embedding: bytes = SQLModelField(sa_column=Column(BLOB))
 
-    @declared_attr
-    def __tablename__(cls) -> str:
-        return 'vec_message'
+#     @declared_attr
+#     def __tablename__(cls) -> str:
+#         return 'vec_message'

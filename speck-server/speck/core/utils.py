@@ -7,7 +7,8 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
-from sqlmodel import SQLModel, Session, delete, select, text
+from sqlalchemy.orm import Session
+from sqlalchemy import select, delete, text
 
 from config import db_engine, settings
 
@@ -61,9 +62,9 @@ def generate_completion_with_validation(
     if settings.use_local_completions:
         base_url = 'http://127.0.0.1:17727/v1'
         api_key = 'not-necessary-for-local-completions'
-        model = None
+        model = ''
     else:
-        provider_settings = settings.cloud_inference_providers['fireworks']
+        provider_settings = settings.cloud_inference_providers['cerebras']
         base_url = provider_settings['endpoint']
         api_key = provider_settings['api_key']
         model = provider_settings['model']
@@ -143,7 +144,7 @@ def create_database_tables():
     """
     # Create the vec_messages table first if it doesn't exist
     with Session(db_engine) as session:
-        session.exec(
+        session.execute(
             text("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS vec_message using vec0 (
                     message_id TEXT PRIMARY KEY,
@@ -153,10 +154,11 @@ def create_database_tables():
         )
 
     # Create the database tables
+    from core.models import Base
     from emails import models as email_models
     from chat import models as chat_models
-    from profiles import models as profile_models
-    SQLModel.metadata.create_all(db_engine)
+    # from profiles import models as profile_models
+    Base.metadata.create_all(db_engine)
 
 def reset_database():
     """

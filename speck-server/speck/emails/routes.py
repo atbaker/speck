@@ -8,8 +8,10 @@ import logging
 from pydantic import BaseModel
 from urllib.parse import urlencode
 import secrets
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import select, Session
+# from sqlmodel import select, Session
 
 from config import settings, get_db_session
 from core.task_manager import task_manager
@@ -87,16 +89,16 @@ async def receive_oauth_code(*, session: Session = Depends(get_db_session), code
     email_address = user_profile['emailAddress']
 
     try:
-        mailbox = session.exec(
+        mailbox = session.execute(
             select(Mailbox).where(Mailbox.email_address == email_address)
-        ).one()
+        ).scalar_one()
     except NoResultFound:
         mailbox = Mailbox(email_address=email_address)
         session.add(mailbox)
         session.commit() # Commit first to get the mailbox id
 
-        profile = Profile(mailbox_id=mailbox.id)
-        session.add(profile)
+        # profile = Profile(mailbox_id=mailbox.id)
+        # session.add(profile)
         session.commit()
 
     # Kick off an initial sync of the mailbox

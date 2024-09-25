@@ -8,7 +8,9 @@ import sys
 from queue import Empty
 from typing import Callable, Optional
 from logging.handlers import QueueHandler, QueueListener
-from sqlmodel import Session, select
+# from sqlmodel import Session, select
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from config import cache, db_engine
 from core.event_manager import event_manager
@@ -197,7 +199,7 @@ class TaskManager:
                     if task_name in ("process_inbox_thread", "execute_function_for_message"):
                         from emails.models import Mailbox
                         with Session(db_engine) as session:
-                            mailbox = session.exec(select(Mailbox)).one()
+                            mailbox = session.execute(select(Mailbox)).scalar_one()
                             message = { "type": "mailbox", "threads": mailbox.get_threads() }
                             asyncio.run(event_manager.notify(message))
             time.sleep(0.1)
