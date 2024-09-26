@@ -14,13 +14,13 @@ def download_models():
     A task run on startup to download the model Llamafile will use. For now,
     downloads just a single model for generating embeddings.
     """
-    embedding_model_url = 'https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1/resolve/main/gguf/mxbai-embed-large-v1-f16.gguf?download=true'
-    embedding_model_output_path = os.path.join(settings.models_dir, 'mxbai-embed-large-v1-f16.gguf')
+    embedding_model_url = 'https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2.F16.gguf?download=true'
+    embedding_model_output_path = os.path.join(settings.models_dir, 'all-MiniLM-L6-v2.F16.gguf')
     download_file(embedding_model_url, embedding_model_output_path)
 
     if settings.use_local_completions:
-        completion_model_url = 'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q5_K_M.gguf?download=true'
-        completion_model_output_path = os.path.join(settings.models_dir, 'gemma-2-9b-it-Q5_K_M.gguf')
+        completion_model_url = 'https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf?download=true'
+        completion_model_output_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf')
         download_file(completion_model_url, completion_model_output_path)
 
     logger.info('Model download complete')

@@ -1,9 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from sqlmodel import SQLModel, Field as SQLModelField, Relationship, Column, JSON, Session, select
+from sqlalchemy.orm import Session, Mapped, mapped_column
+from sqlalchemy import select, Integer, JSON, String, ForeignKey, DateTime
+# from sqlmodel import SQLModel, Field as SQLModelField, Relationship, Column, JSON, Session, select
 
 from config import db_engine
+from core.models import Base
 from core.utils import generate_completion_with_validation
 from emails.models import Message
 
@@ -23,18 +26,19 @@ PROFILE_ATTRIBUTE_PROMPT_TEMPLATE = """
     </instructions>
     """
 
-class Profile(SQLModel, table=True):
-    id: int | None = SQLModelField(default=None, primary_key=True)
+class Profile(Base):
+    __tablename__ = 'profile'
 
-    name: Optional[str] = None
-    primary_address: Optional[str] = None
-    financial_institutions: List[str] = SQLModelField(default_factory=list, sa_column=Column(JSON))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    mailbox_id: int = SQLModelField(foreign_key="mailbox.id", unique=True)
+    name: Mapped[Optional[str]] = mapped_column(String(80))
+    primary_address: Mapped[Optional[str]] = mapped_column(String(160))
+    financial_institutions: Mapped[List[str]] = mapped_column(JSON)
+
+    mailbox_id: Mapped[int] = mapped_column(Integer, ForeignKey("mailbox.id"), unique=True)
     # mailbox: "Mailbox" = Relationship(back_populates="profile", sa_relationship_kwargs={"uselist": False})
-    mailbox: "Mailbox" = Relationship(sa_relationship_kwargs={"uselist": False})
 
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     @property
     def complete(self):
@@ -80,9 +84,9 @@ class Profile(SQLModel, table=True):
 
         # Get the 10 most recent messages
         with Session(db_engine) as session: 
-            messages = session.exec(
+            messages = session.execute(
                 select(Message).where(Message.mailbox_id == self.mailbox_id).order_by(Message.received_at.desc()).limit(10)
-            ).all()
+            ).scalars().all()
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),

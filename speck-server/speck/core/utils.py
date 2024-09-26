@@ -140,23 +140,12 @@ def download_file(url, output_path, chunk_size=1024*1024):
 
 def create_database_tables():
     """
-    Sets up the database using SQLModel and sqlite-vec.
+    Sets up the database using SQLAlchemy.
     """
-    # Create the vec_messages table first if it doesn't exist
-    with Session(db_engine) as session:
-        session.execute(
-            text("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS vec_message using vec0 (
-                    message_id TEXT PRIMARY KEY,
-                    body_embedding FLOAT[1024]
-                )
-                """)
-        )
-
     # Create the database tables
     from core.models import Base
     from emails import models as email_models
-    from chat import models as chat_models
+    # from chat import models as chat_models
     # from profiles import models as profile_models
     Base.metadata.create_all(db_engine)
 
@@ -164,23 +153,22 @@ def reset_database():
     """
     Resets the Speck database. Used during local development.
     """
-    from emails.models import Mailbox, Message, VecMessage, Thread
+    from emails.models import Mailbox, Message, Thread
     with Session(db_engine) as session:
         # Keep the Mailbox but reset the sync fields
-        mailboxes = session.exec(select(Mailbox)).all()
+        mailboxes = session.execute(select(Mailbox)).scalars().all()
         for mailbox in mailboxes:
             mailbox.last_history_id = None
             mailbox.last_synced_at = None
             session.add(mailbox)
 
-        # Delete all VecMessage, Message, and Thread rows
-        session.exec(delete(VecMessage))
-        session.exec(delete(Message))
-        session.exec(delete(Thread))
+        # Delete all Message and Thread rows
+        session.execute(delete(Message))
+        session.execute(delete(Thread))
 
         # The LangGraph SQLite checkpointer creates additional tables we need
         # to delete manually
-        session.exec(text("DROP TABLE IF EXISTS writes"))
-        session.exec(text("DROP TABLE IF EXISTS checkpoints"))
+        session.execute(text("DROP TABLE IF EXISTS writes"))
+        session.execute(text("DROP TABLE IF EXISTS checkpoints"))
 
         session.commit()

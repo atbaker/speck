@@ -8,7 +8,7 @@ import html2text
 import logging
 import pendulum
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Boolean, Enum, ForeignKey, DateTime, Integer, String, select, delete, text
+from sqlalchemy import BLOB, Boolean, CheckConstraint, Enum, ForeignKey, DateTime, Integer, String, select, delete, text
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Mapped, mapped_column, relationship, Session
@@ -427,20 +427,22 @@ class Mailbox(Base):
 
         # Run the query against the VecMessage table to find the 10 most similar messages
         with Session(db_engine) as session:
-            results = session.execute(text(
-                'select * from vec_message where body_embedding match :query_embedding limit :k'
-            ).bindparams(
-                query_embedding=serialized_query_embedding,
-                k=k
-            )).scalars().all()
+            results = session.execute(
+                text('SELECT id, vec_distance_L2(body_embedding, :query_embedding) AS distance FROM message WHERE mailbox_id = :mailbox_id AND body_embedding IS NOT NULL ORDER BY distance LIMIT :k').bindparams(
+                    query_embedding=serialized_query_embedding,
+                    mailbox_id=self.id,
+                    k=k
+                )
+            ).all()
 
-            # Get the message_ids from the results
-            message_ids = [message_id for message_id, embedding in results]
-
-            # Get the messages from the Message table
-            messages = session.execute(
-                select(Message).where(Message.id.in_(message_ids))
-            ).scalars().all()
+            # We need to retain the order of the results, so for now we'll just
+            # create our messages list one-by-one
+            messages = []
+            for message_id, distance in results:
+                message = session.execute(
+                    select(Message).where(Message.id == message_id)
+                ).scalar_one()
+                messages.append(message)
 
         return messages
 
@@ -750,6 +752,14 @@ class Message(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime)
     body: Mapped[str] = mapped_column(String)
 
+    body_embedding: Mapped[Optional[bytes]] = mapped_column(
+        BLOB,
+        CheckConstraint(
+            "(body_embedding IS NULL) OR (typeof(body_embedding) = 'blob' AND vec_length(body_embedding) = 384)",
+            name='chk_body_embedding_valid'
+        )
+    )
+
     embedding_generated: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -781,60 +791,15 @@ class Message(Base):
 
     def generate_embedding(self):
         """Generate an embedding for the message."""
-        # TODO: Re-enable embeddings later
-        return
+        # If this message already has an embedding or has a blank body, do nothing
+        if self.body_embedding or not self.body:
+            return
 
-        # If this message has a blank body, we don't need to generate an embedding
-        if not self.body:
-            with Session(db_engine) as session:
-                self.embedding_generated = True
-                session.add(self)
-                session.commit()
-                return
-
-        # Check if we already have an embedding
-        with Session(db_engine) as session:
-            try:
-                session.execute(
-                    select(VecMessage).where(VecMessage.message_id == self.id)
-                ).scalar_one()
-
-                # If we do, return
-                return
-            except NoResultFound:
-                # If we don't, generate it
-                pass
-
-        # Generate the embedding
+        # Generate the embedding and convert it to a BLOB
         embedding = generate_embedding(self.body)
+        self.body_embedding = serialize_float32(embedding)
 
-        # Convert the result to a BLOB
-        embedding_blob = serialize_float32(embedding)
-
-        # Save it as a new VecMessage object and set the embedding_generated flag
+        # Save this message
         with Session(db_engine) as session:
-            vec_message = VecMessage(
-                message_id=self.id,
-                body_embedding=embedding_blob
-            )
-            session.add(vec_message)
-
-            self.embedding_generated = True
             session.add(self)
-
             session.commit()
-
-# class VecMessage(SQLModel, table=True):
-#     """
-#     A virtual table that stores the embeddings of the messages.
-
-#     NOTE: This is a virtual table that is created using the sqlite-vec extension,
-#     not by SQLModel.
-#     """
-#     message_id: str = SQLModelField(primary_key=True)
-
-#     body_embedding: bytes = SQLModelField(sa_column=Column(BLOB))
-
-#     @declared_attr
-#     def __tablename__(cls) -> str:
-#         return 'vec_message'
