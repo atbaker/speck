@@ -1,7 +1,6 @@
 import logging
 import pendulum
 from sqlalchemy.exc import NoResultFound
-# from sqlmodel import Session, select
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional

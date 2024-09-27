@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Literal
 from pydantic import BaseModel, Field
+from typing import Literal
+from sqlalchemy import String, ForeignKey
 from sqlalchemy.dialects.sqlite import JSON
-from sqlmodel import Column, Field as SQLModelField, SQLModel, Relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from core.models import Base
 from emails.models import Mailbox
 
 
@@ -13,13 +15,15 @@ class Message(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
-class Conversation(SQLModel, table=True):
-    id: int | None = SQLModelField(default=None, primary_key=True)
+class Conversation(Base):
+    __tablename__ = 'conversations'
 
-    mailbox_id: int = SQLModelField(default=None, foreign_key='mailbox.id')
-    # mailbox: "Mailbox" = Relationship(back_populates='conversations')
+    id: Mapped[int] = mapped_column(primary_key=True)
 
-    messages: list[Message] = SQLModelField(sa_column=Column(JSON))
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailboxes.id'))
+    mailbox: Mapped["Mailbox"] = relationship()
 
-    created_at: datetime = SQLModelField(default_factory=datetime.now)
+    messages: Mapped[list[Message]] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Database
     database_path: str = os.path.join(speck_data_dir, "speck.db")
+    database_url: str = f'sqlite:///{database_path}'
 
     # Cache
     cache_dir: str = os.path.join(speck_data_dir, 'cache')
@@ -95,7 +96,7 @@ os.makedirs(settings.speck_data_dir, exist_ok=True)
 os.makedirs(settings.log_dir, exist_ok=True)
 
 # SQLModel
-db_engine = create_engine('sqlite:///' + settings.database_path)
+db_engine = create_engine(settings.database_url)
 
 def get_db_session():
     with Session(db_engine) as session:

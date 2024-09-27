@@ -137,18 +137,6 @@ def download_file(url, output_path, chunk_size=1024*1024):
 
             logger.info(f"Downloaded {output_path}")
 
-
-def create_database_tables():
-    """
-    Sets up the database using SQLAlchemy.
-    """
-    # Create the database tables
-    from core.models import Base
-    from emails import models as email_models
-    # from chat import models as chat_models
-    # from profiles import models as profile_models
-    Base.metadata.create_all(db_engine)
-
 def reset_database():
     """
     Resets the Speck database. Used during local development.

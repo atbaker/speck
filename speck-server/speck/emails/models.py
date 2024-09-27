@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class Mailbox(Base):
-    __tablename__ = 'mailbox'
+    __tablename__ = 'mailboxes'
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -40,15 +40,12 @@ class Mailbox(Base):
         back_populates='mailbox',
         cascade='all, delete'
     )
-
     messages: Mapped[list['Message']] = relationship(
         back_populates='mailbox',
         cascade='all, delete'
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-
-    # profile: Optional["Profile"] = Relationship(back_populates="mailbox", sa_relationship_kwargs={"uselist": False})
 
     def full_sync(self):
         """
@@ -544,11 +541,11 @@ class ExecutedFunction(BaseModel):
     result: FunctionResult | None = None
 
 class Thread(Base):
-    __tablename__ = 'thread'
+    __tablename__ = 'threads'
 
     id: Mapped[str] = mapped_column(String(16), primary_key=True)
 
-    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailbox.id'))
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailboxes.id'))
     mailbox: Mapped["Mailbox"] = relationship(back_populates='threads')
 
     history_id: Mapped[int] = mapped_column(Integer)
@@ -729,17 +726,17 @@ class Thread(Base):
         }
 
 class Message(Base):
-    __tablename__ = 'message'
+    __tablename__ = 'messages'
 
     id: Mapped[str] = mapped_column(String(16), primary_key=True)
 
-    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailbox.id'))
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailboxes.id'))
     mailbox: Mapped["Mailbox"] = relationship(back_populates='messages')
 
     raw: Mapped[str] = mapped_column(String)
     history_id: Mapped[int] = mapped_column(Integer)
 
-    thread_id: Mapped[str] = mapped_column(ForeignKey('thread.id'))
+    thread_id: Mapped[str] = mapped_column(ForeignKey('threads.id'))
     thread: Mapped["Thread"] = relationship(back_populates='messages')
 
     label_ids: Mapped[list[str]] = mapped_column(JSON, default=list)

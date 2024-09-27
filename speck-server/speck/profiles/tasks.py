@@ -1,7 +1,9 @@
 
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import Session, select
+
 
 from config import db_engine
 from .models import Profile
@@ -14,7 +16,7 @@ def update_profile():
     with Session(db_engine) as session:
         try:
             # TODO: Enhance to support multiple profiles
-            profile = session.exec(select(Profile)).one()
+            profile = session.execute(select(Profile)).scalar_one()
             profile.mailbox
         except NoResultFound:
             # If we didn't find a Profile, then do nothing

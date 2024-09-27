@@ -8,7 +8,6 @@ import sys
 from queue import Empty
 from typing import Callable, Optional
 from logging.handlers import QueueHandler, QueueListener
-# from sqlmodel import Session, select
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

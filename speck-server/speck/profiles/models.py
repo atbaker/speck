@@ -1,14 +1,13 @@
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, Mapped, mapped_column
+from sqlalchemy.orm import Session, Mapped, mapped_column, relationship
 from sqlalchemy import select, Integer, JSON, String, ForeignKey, DateTime
-# from sqlmodel import SQLModel, Field as SQLModelField, Relationship, Column, JSON, Session, select
 
 from config import db_engine
 from core.models import Base
 from core.utils import generate_completion_with_validation
-from emails.models import Message
+from emails.models import Mailbox, Message
 
 
 PROFILE_ATTRIBUTE_PROMPT_TEMPLATE = """
@@ -27,7 +26,7 @@ PROFILE_ATTRIBUTE_PROMPT_TEMPLATE = """
     """
 
 class Profile(Base):
-    __tablename__ = 'profile'
+    __tablename__ = 'profiles'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -35,8 +34,8 @@ class Profile(Base):
     primary_address: Mapped[Optional[str]] = mapped_column(String(160))
     financial_institutions: Mapped[List[str]] = mapped_column(JSON)
 
-    mailbox_id: Mapped[int] = mapped_column(Integer, ForeignKey("mailbox.id"), unique=True)
-    # mailbox: "Mailbox" = Relationship(back_populates="profile", sa_relationship_kwargs={"uselist": False})
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey("mailboxes.id"), unique=True)
+    mailbox: Mapped["Mailbox"] = relationship()
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 

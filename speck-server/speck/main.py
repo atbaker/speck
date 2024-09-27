@@ -1,6 +1,5 @@
 import logging
 import multiprocessing
-import os
 import signal
 import sys
 
@@ -23,8 +22,6 @@ def handle_exit(*args):
         llm_service_manager.force_stop()
     except Exception as e:
         logger.error(f"Error force stopping LLM services: {e}")
-
-    sys.exit(0)
 
     sys.exit(0)
 
@@ -53,9 +50,14 @@ def start():
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
-    # Create the database tables
-    from core.utils import create_database_tables
-    create_database_tables()
+    # Use Alembic to apply the database migrations
+    from alembic.config import Config as AlembicConfig
+    from alembic import command
+    from config import settings
+
+    alembic_cfg = AlembicConfig('alembic.ini')
+    alembic_cfg.set_main_option('sqlalchemy.url', settings.database_url)
+    command.upgrade(alembic_cfg, 'head')
 
     # Clear the cache
     from config import cache

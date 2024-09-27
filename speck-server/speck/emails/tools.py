@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import NoResultFound
-# from sqlmodel import Session, select
 
 from config import db_engine
 from .models import Mailbox
