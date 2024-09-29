@@ -5,11 +5,50 @@
     <link rel="stylesheet" type="text/css" href="styles/tailwind.build.css">
     <script src="../node_modules/@alpinejs/csp/dist/cdn.min.js" defer></script>
 </head>
-<body class="p-4 bg-gradient-to-r from-blue-50 to-blue-200">
-    <div x-data="threadData" class="p-4">
-        <p class="text-sm font-bold" x-text="category"></p>
-        <p class="text-xl mt-2" x-text="summary"></p>
-        <p class="text-sm text-gray-500 mt-2" x-text="threadId"></p>
+<body class="bg-gradient-to-r from-blue-50 to-blue-200 h-screen">
+    <div x-data="threadData" class="flex flex-col h-full">
+        <!-- Existing thread data at the top -->
+        <div class="p-4">
+            <p class="text-sm font-bold" x-text="category"></p>
+            <p class="text-xl mt-2" x-text="summary"></p>
+            <p class="text-sm text-gray-500 mt-2" x-text="threadId"></p>
+        </div>
+
+        <!-- Chat history fills all available space under thread data -->
+        <div class="flex-grow overflow-y-auto p-4" x-ref="chatContainer">
+            <div class="space-y-4">
+                <!-- Render messages -->
+                <template x-for="message in messages">
+                    <div x-bind:class="message.messageClass">
+                        <div x-bind:class="message.bubbleClass">
+                            <p class="text-sm" x-text="message.content"></p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Message input at the bottom -->
+        <div class="p-4">
+            <div class="flex items-center">
+                <input
+                    type="text"
+                    x-bind:value="userInput"
+                    x-on:input="handleInput"
+                    x-on:keydown.enter="sendMessage"
+                    x-bind:placeholder="inputPlaceholder"
+                    x-bind:disabled="isTyping"
+                    class="flex-1 border border-gray-300 rounded-l-lg p-2 focus:outline-none"
+                />
+                <button
+                    x-on:click="sendMessage"
+                    x-bind:disabled="isTyping"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-r-lg disabled:bg-gray-400"
+                >
+                    Send
+                </button>
+            </div>
+        </div>
     </div>
     <script src="sidepanel.js"></script>
 </body>

@@ -16,7 +16,7 @@ from config import settings, get_db_session
 from core.task_manager import task_manager
 from profiles.models import Profile
 
-from .models import Mailbox
+from .models import Mailbox, Thread
 from .utils import get_gmail_api_client
 
 logger = logging.getLogger(__name__)

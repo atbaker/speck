@@ -8,6 +8,9 @@ function sendThreadIdToBackground() {
             console.log('Sending threadId to background:', threadId);
             chrome.runtime.sendMessage({ action: 'set_thread_id', threadId: threadId });
         }
+    } else {
+        console.log('No threadId found');
+        chrome.runtime.sendMessage({ action: 'set_thread_id', threadId: null });
     }
 }
 

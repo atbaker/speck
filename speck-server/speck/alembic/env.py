@@ -18,8 +18,13 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from core.models import Base
-from core import Base
+from core.models import Base
+
+# Import our other models here too so that Alembic can detect them
+from chat import models as chat_models
+from emails import models as email_models
+from profiles import models as profile_models
+
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -27,6 +32,11 @@ target_metadata = Base.metadata
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
+def include_object(object, name, type_, reflected, compare_to):
+    """Custom include_object function to exclude LangGraph checkpoint tables from Alembic."""
+    if type_ == "table" and name in ('checkpoints', 'writes'):
+        return False
+    return True
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -46,6 +56,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -74,7 +85,9 @@ def run_migrations_online() -> None:
         sqlite_connection.enable_load_extension(False)
 
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

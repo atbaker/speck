@@ -377,35 +377,22 @@ class Mailbox(Base):
         """
         return general_context
 
-    def get_thread(self, thread_id: str):
-        """Get the details of a thread."""
+    def get_state(self):
+        """Get the current state of the Mailbox, for use in the UI."""
         with Session(db_engine) as session:
-            thread = session.execute(
-                select(Thread).where(Thread.mailbox_id == self.id, Thread.id == thread_id)
-            ).scalar_one()
+            threads = self.threads
 
-            # Access the thread's messages to avoid lazy loading errors
-            thread.messages
-
-        return thread
-
-    def get_threads(self):
-        """Get all the threads in the mailbox."""
-        with Session(db_engine) as session:
-            threads = session.execute(
-                select(Thread).where(Thread.mailbox_id == self.id)
-            ).scalars().all()
-
-        mailbox_data = {}
-        for thread in threads:
-            mailbox_data[thread.id] = {
-                'id': thread.id,
-                'category': thread.category,
-                'summary': thread.summary,
-                'selected_functions': thread.selected_functions,
-                'executed_functions': thread.executed_functions,
+        state = {
+            "id": self.id,
+            "email_address": self.email_address,
+            "last_synced_at": self.last_synced_at.isoformat() if self.last_synced_at else None,
+            "summary": "[placeholder for summary]",
+            "threads": {
+                thread.id: thread.get_state() for thread in threads
             }
-        return mailbox_data
+        }
+
+        return state
 
     def list_threads(self, max_results: int = 100):
         """List the threads in the mailbox."""
@@ -571,6 +558,16 @@ class Thread(Base):
     def in_inbox(self):
         """Returns True if the thread has a message in the user's inbox."""
         return any(message.in_inbox for message in self.messages)
+
+    def get_state(self):
+        """Get the current state of the Thread, for use in the UI."""
+        state = {
+            "id": self.id,
+            "mailbox_id": self.mailbox_id,
+            "category": self.category,
+            "summary": self.summary
+        }
+        return state
 
     def get_details(self):
         """
@@ -790,11 +787,16 @@ class Message(Base):
         """Generate an embedding for the message."""
         # If this message already has an embedding or has a blank body, do nothing
         if self.body_embedding or not self.body:
+            self.embedding_generated = True
+            with Session(db_engine) as session:
+                session.add(self)
+                session.commit()
             return
 
         # Generate the embedding and convert it to a BLOB
         embedding = generate_embedding(self.body)
         self.body_embedding = serialize_float32(embedding)
+        self.embedding_generated = True
 
         # Save this message
         with Session(db_engine) as session:

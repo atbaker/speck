@@ -1,79 +1,84 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import logging
 import json
-from typing import List
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 
-from config import db_engine
+from emails.models import Mailbox
 from core.event_manager import event_manager
-from core.task_manager import task_manager
-from emails.models import Mailbox, Message
-
-logger = logging.getLogger(__name__)
+from config import db_engine
 
 router = APIRouter()
-
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await event_manager.connect(websocket)
 
-    with Session(db_engine) as session:
-        try:
-            # Send the latest Mailbox state upon initial connection
-            # TODO: Enhance to support multiple mailboxes
-            mailbox = session.execute(select(Mailbox)).scalar_one()
-            await event_manager.notify({ "type": "mailbox", "threads": mailbox.get_threads() })
-        except NoResultFound:
-            # If we didn't find a Mailbox, then do nothing
-            return
+    try:
+        # Send the latest Mailbox state upon initial connection
+        with Session(db_engine) as session:
+            try:
+                # Assuming a single mailbox for MVP; adapt if multiple mailboxes are needed
+                mailbox = session.execute(select(Mailbox)).scalar_one()
+                mailbox_state = mailbox.get_state()
+                await websocket.send_json({
+                    "type": "mailbox",
+                    "payload": mailbox_state
+                })
+            except NoResultFound:
+                # If no Mailbox exists, send an empty state or an appropriate message
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "No mailbox found."
+                })
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "message": f"An error occurred while sending mailbox state: {str(e)}"
+        })
 
     try:
         while True:
+            # For MVP, we're not handling incoming actions yet
             data = await websocket.receive_text()
             message = json.loads(data)
-            action = message.get('action')
 
-            if action == 'execute_function':
-                thread_id = message['args']['thread_id']
-                function_name = message['args']['function_name']
-
-                from emails.tasks import execute_function_for_message
-                task_manager.add_task(
-                    task=execute_function_for_message,
-                    thread_id=thread_id,
-                    function_name=function_name
-                )
-                await websocket.send_text(f"Function {function_name} scheduled for thread {thread_id}.")
-
-            elif action == 'get_thread_details':
-                thread_id = message.get('threadId')
-                if thread_id:
+            # Chat messages
+            if message.get("type") == "chat_message":
+                # Get our create a Conversation object
+                from chat.models import Conversation
+                with Session(db_engine) as session:
                     try:
-                        mailbox = session.execute(select(Mailbox)).scalar_one()
-                        thread = mailbox.get_thread(thread_id)
-                        thread_data = {
-                            "threadId": thread.id,
-                            "summary": thread.summary,
-                            "category": thread.category
-                        }
-                        await websocket.send_text(json.dumps({
-                            "type": "thread_details",
-                            "threadDetails": thread_data
-                        }))
+                        conversation = session.execute(
+                            select(Conversation)
+                            .filter(Conversation.mailbox_id == mailbox.id)
+                            .order_by(Conversation.created_at.desc())
+                            .limit(1)
+                        ).scalar_one()
                     except NoResultFound:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "message": f"Thread with ID {thread_id} not found."
-                        }))
-                else:
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "message": "No threadId provided in the request."
-                    }))
+                        conversation = Conversation(mailbox_id=mailbox.id)
+                        session.add(conversation)
+                        session.commit()
+
+                    # Process the user message
+                    content = message['payload']
+                    reply = conversation.process_user_message(content)
+
+                    # Save the conversation state
+                    session.add(conversation)
+                    session.commit()
+
+                await websocket.send_json({
+                    "type": "chat_message",
+                    "payload": reply.content
+                })
 
     except WebSocketDisconnect:
         event_manager.disconnect(websocket)
-        logger.info("WebSocket disconnected")
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "message": f"An unexpected error occurred: {str(e)}"
+        })
+        await websocket.close()
+        event_manager.disconnect(websocket)

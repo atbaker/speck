@@ -1,28 +1,40 @@
-from typing import Dict
-from fastapi import WebSocket
+from typing import Set
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
 
 class EventManager:
     def __init__(self):
-        self.connections: Dict[str, WebSocket] = {}
+        self.active_connections = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        connection_id = str(id(websocket))
-        self.connections[connection_id] = websocket
+        # Start the heartbeat task and store it
+        heartbeat_task = asyncio.create_task(self._start_heartbeat(websocket))
+        self.active_connections[websocket] = heartbeat_task
 
     def disconnect(self, websocket: WebSocket):
-        connection_id = str(id(websocket))
-        if connection_id in self.connections:
-            del self.connections[connection_id]
+        # Cancel the heartbeat task associated with the websocket
+        heartbeat_task = self.active_connections.pop(websocket, None)
+        if heartbeat_task:
+            heartbeat_task.cancel()
 
-    async def notify(self, message: dict):
-        connection_ids = list(self.connections.keys())
-        for connection_id in connection_ids:
-            websocket = self.connections.get(connection_id)
-            if websocket:
-                try:
-                    await websocket.send_json(message)
-                except Exception as e:
-                    self.disconnect(websocket)
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections.copy():
+            try:
+                await connection.send_json(message)
+            except WebSocketDisconnect:
+                self.disconnect(connection)
+
+    async def _start_heartbeat(self, websocket: WebSocket):
+        try:
+            while True:
+                await asyncio.sleep(10)  # Heartbeat interval in seconds
+                await websocket.send_json({"type": "heartbeat"})
+        except asyncio.CancelledError:
+            # Handle the cancellation by simply passing
+            pass
+        except Exception as e:
+            # Handle other exceptions if necessary
+            print(f"Heartbeat error: {e}")
 
 event_manager = EventManager()
