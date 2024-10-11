@@ -62,11 +62,11 @@ class Settings(BaseSettings):
 
     # Cloud inference
     cloud_inference_providers: dict = {
-        'cudo': {
-            'endpoint': 'https://crom.myspeck.ai/v1',
-            'api_key': os.environ['VLLM_API_KEY'],
-            'model': 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
-        },
+        # 'cudo': {
+        #     'endpoint': 'https://crom.myspeck.ai/v1',
+        #     'api_key': os.environ['VLLM_API_KEY'],
+        #     'model': 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
+        # },
         'cerebras': {
             'endpoint': 'https://api.cerebras.ai/v1',
             'api_key': os.environ['CEREBRAS_API_KEY'],

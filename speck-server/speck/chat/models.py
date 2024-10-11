@@ -6,7 +6,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 import pendulum
 
-from sqlalchemy import ForeignKey, UUID
+from sqlalchemy import ForeignKey, Uuid as SqlalchemyUuid
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,7 +27,7 @@ class Message(BaseModel):
 class Conversation(Base):
     __tablename__ = 'conversations'
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(SqlalchemyUuid(native_uuid=False), primary_key=True, default=uuid.uuid4)
 
     mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailboxes.id'))
     mailbox: Mapped["Mailbox"] = relationship()

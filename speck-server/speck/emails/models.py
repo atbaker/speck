@@ -4,8 +4,8 @@ import enum
 import email
 from googleapiclient.errors import HttpError as GoogleApiHttpError
 import uuid
-import html2text
 import logging
+from markdownify import markdownify as md
 import pendulum
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import BLOB, Boolean, CheckConstraint, Enum, ForeignKey, DateTime, Integer, String, select, delete, text
@@ -91,11 +91,8 @@ class Mailbox(Base):
             most_recent_history_id = max(most_recent_history_id, thread.history_id)
 
         with Session(db_engine) as session:
-            # Delete old Message, VecMessage, and Thread objects which are no
-            # longer in our set, using a subquery because VecMessage doesn't
-            # have a thread_id field
-            # subquery = select(Message.id).where(Message.thread_id.not_in(thread_ids))
-            # session.execute(delete(VecMessage).where(VecMessage.message_id.in_(subquery)).execution_options(is_delete_using=True))
+            # Delete old Message and Thread objects which are no longer in the
+            # result set
             session.execute(delete(Message).where(Message.thread_id.not_in(thread_ids)))
             session.execute(delete(Thread).where(Thread.id.not_in(thread_ids)))
 
@@ -337,14 +334,10 @@ class Mailbox(Base):
         message.subject = email_message['Subject']
         message.received_at = received_at
 
-        # Use html2text to process the body
-        text_maker = html2text.HTML2Text()
-        text_maker.ignore_images = True
-        text_maker.ignore_links = True
-
+        # Use markdownify to process the body
         try:
             content = email_message.get_body(preferencelist=('html', 'text')).get_content()
-            message.body = text_maker.handle(content)
+            message.body = md(content, heading_style='ATX')
         except AttributeError:
             # If the message doesn't have a body, like a calendar invitation,
             # just set its body to an empty string for now
@@ -725,7 +718,8 @@ class Thread(Base):
 class Message(Base):
     __tablename__ = 'messages'
 
-    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    rowid: Mapped[int] = mapped_column(Integer, primary_key=True) # Used for FTS
+    id: Mapped[str] = mapped_column(String(16), unique=True, index=True, nullable=False)
 
     mailbox_id: Mapped[int] = mapped_column(ForeignKey('mailboxes.id'))
     mailbox: Mapped["Mailbox"] = relationship(back_populates='messages')
@@ -802,3 +796,11 @@ class Message(Base):
         with Session(db_engine) as session:
             session.add(self)
             session.commit()
+
+
+class MessageFTS(Base):
+    __tablename__ = 'messages_fts'
+
+    rowid: Mapped[int] = mapped_column(Integer, primary_key=True)
+    body: Mapped[str] = mapped_column(String)
+    subject: Mapped[str] = mapped_column(String)
