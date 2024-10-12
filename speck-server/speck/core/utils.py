@@ -48,7 +48,8 @@ def generate_completion_with_validation(
     parser = PydanticOutputParser(pydantic_object=output_model)
 
     # Extend the prompt with the output format, and add format instructions to our partial variables
-    prompt_template += "\n<output-format>Wrap the output in triple backticks (```), not <json> tags.\n{{format_instructions}}</output-format>"
+    # prompt_template += "\n<output-format>Wrap the output in triple backticks (```), not <json> tags.\n{{format_instructions}}</output-format>"
+    # prompt_template += "\n{{ format_instructions }}"
     partial_variables['format_instructions'] = parser.get_format_instructions()
 
     # Render the prompt with the partial variables
@@ -87,7 +88,12 @@ def generate_completion_with_validation(
 
         # Otherwise, include the error message in the prompt and try again
         logger.error(f"LLM response was invalid: {parsing_error}")
-        prompt_template += f"\n\n<output-parsing-error>Your output was invalid. Here is what you provided: {parsing_error.llm_output}\n\nHere is the error message: {parsing_error}\n\nTry again to create a valid {output_model.__name__} object.</output-parsing-error>"
+        prompt_template += f"""
+        \n\nYour previous output was invalid.
+        Here is what you provided: \"\"\"{parsing_error.llm_output}\"\"\"
+        Here is the error message: \"\"\"{parsing_error}\"\"\"
+        Try again to create a valid {output_model.__name__} object.
+        """
         result = generate_completion_with_validation(
             prompt_template,
             partial_variables,

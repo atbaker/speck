@@ -19,8 +19,8 @@ def download_models():
     download_file(embedding_model_url, embedding_model_output_path)
 
     if settings.use_local_completions:
-        completion_model_url = 'https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf?download=true'
-        completion_model_output_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf')
+        completion_model_url = 'https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf?download=true'
+        completion_model_output_path = os.path.join(settings.models_dir, 'Meta-Llama-3.2-3B-Instruct-Q6_K.gguf')
         download_file(completion_model_url, completion_model_output_path)
 
     logger.info('Model download complete')

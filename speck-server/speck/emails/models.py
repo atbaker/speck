@@ -3,9 +3,9 @@ from datetime import datetime
 import enum
 import email
 from googleapiclient.errors import HttpError as GoogleApiHttpError
+import html2text
 import uuid
 import logging
-from markdownify import markdownify as md
 import pendulum
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import BLOB, Boolean, CheckConstraint, Enum, ForeignKey, DateTime, Integer, String, select, delete, text
@@ -334,10 +334,14 @@ class Mailbox(Base):
         message.subject = email_message['Subject']
         message.received_at = received_at
 
-        # Use markdownify to process the body
+        # Use html2text to process the body
+        text_maker = html2text.HTML2Text()
+        text_maker.ignore_images = True
+        text_maker.ignore_links = True
+
         try:
             content = email_message.get_body(preferencelist=('html', 'text')).get_content()
-            message.body = md(content, heading_style='ATX')
+            message.body = text_maker.handle(content)
         except AttributeError:
             # If the message doesn't have a body, like a calendar invitation,
             # just set its body to an empty string for now
@@ -363,10 +367,8 @@ class Mailbox(Base):
     def get_general_context(self):
         """Get the general context of the mailbox, to be used in prompts."""
         general_context = f"""
-        <general-context>
-            <current-utc-datetime>{ str(pendulum.now('utc')) }</current-utc-datetime>
-            <user-email-address>{ self.email_address }</user-email-address>
-        </general-context>
+        The user's email address is { self.email_address }.
+        The current UTC datetime is { str(pendulum.now('utc')) }.
         """
         return general_context
 
@@ -586,7 +588,6 @@ class Thread(Base):
         
         - Categorize the thread
         - Summarize the thread
-        - Select relevant Speck Functions for this thread
         """
         # If this Thread has already been processed, do nothing
         if self.processed:
@@ -599,73 +600,36 @@ class Thread(Base):
             return
 
         prompt_template = """
-        <context>
-        {{ thread_details }}
+        Analyze this email thread from the user's inbox, responding with a category and a summary.
+
+        When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.
+        Your summary should be brief, no longer than 80 characters. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.
+
+        {{ format_instructions }}
+
+        Do not respond with any additional commentary outside of the JSON object.
+        Enclose your response in triple backticks. Here's an example:
+        ```
+        {
+            "category": "[your category here]",
+            "summary": "[your summary here]"
+        }
+        ```
+
+        General context: \"\"\"
         {{ general_context }}
-        </context>
+        \"\"\"
 
-        <instructions>
-        <overall-instructions>
-        Analyze this email thread from the user's inbox by completing three tasks: categorizing the thread, generating a short summary, and selecting relevant Speck Functions to execute.
-        </overall-instructions>
-
-        <task-one-categorize>
-        <task-instructions>
-        Categorize this email thread into one of the categories listed below. When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.
-        </task-instructions>
-        <category-descriptions>
-        {% for category, description in category_descriptions.items() %}
-        <category>
-        <name>
-        {{ category.value }}
-        </name>
-        <description>
-        {{ description }}
-        </description>
-        </category>
-        {% endfor %}
-        </category-descriptions>
-        </task-one-categorize>
-
-        <task-two-summarize>
-        <task-instructions>
-        Generate a short summary of this email thread. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.
-        </task-instructions>
-        </task-two-summarize>
-
-        <task-three-function-selection>
-        <task-instructions>
-        Speck Functions are actions that an AI assistant can perform on behalf of the user. Based on the contents of the email the user received, determine which Speck Functions, if any, are relevant to the message. If a function is relevant, identify which function, the arguments it should use based on the message, the text the UI button should display, and the reason for the function's relevance to this email message. For most threads, no Speck Functions will be relevant, and so you should set the 'no_functions_selected' field to true. Do not invent new functions, only return functions that are already in the Speck Function Library.
-        </task-instructions>
-        <speck-function-library>
-        {% for func_name, func_details in speck_function_library.functions.items() %}
-        <speck-function>
-        <name>
-        {{ func_name }}
-        </name>
-        <parameters>
-        {{ func_details.parameters }}
-        </parameters>
-        <description>
-        {{ func_details.description }}
-        </description>
-        </speck-function>
-        {% endfor %}
-        </speck-function-library>
-        </task-three-function-selection>
-        </instructions>
+        Thread details: \"\"\"
+        {{ thread_details }}
+        \"\"\"
         """
 
-        partial_variables = {
-            'category_descriptions': THREAD_CATEGORY_DESCRIPTIONS,
-            'speck_function_library': speck_library
-        }
+        partial_variables = {}
 
         class ThreadAnalysis(BaseModel):
             category: ThreadCategory
             summary: str = Field(max_length=80)
-            no_functions_selected: bool = Field(default=True)
-            selected_functions: Optional[List[SelectedFunction]] = None
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
@@ -677,13 +641,11 @@ class Thread(Base):
             partial_variables=partial_variables,
             input_variables=input_variables,
             output_model=ThreadAnalysis,
-            llm_temperature=0
+            llm_temperature=0.2
         )
 
         self.category = result.category
         self.summary = result.summary
-        if result.selected_functions is not None:
-            self.selected_functions = {func.name: func.model_dump_json() for func in result.selected_functions}
 
         self.processed = True
 

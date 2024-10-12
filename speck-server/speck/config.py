@@ -58,7 +58,7 @@ class Settings(BaseSettings):
         llamafiler_exe_path += '.exe'
 
     # Cloud vs. local completion
-    use_local_completions: bool = False
+    use_local_completions: bool = True
 
     # Cloud inference
     cloud_inference_providers: dict = {

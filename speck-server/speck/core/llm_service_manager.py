@@ -43,8 +43,8 @@ class LLMServiceManager:
             ]
         elif model_type == 'completion':
             service_port = '17727'
-            model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.1-8B-Instruct-Q4_K_S.gguf')
-            context_size = '10240'
+            model_path = os.path.join(settings.models_dir, 'Meta-Llama-3.2-3B-Instruct-Q6_K.gguf')
+            context_size = '16384'
 
             process_args = [
                 settings.llamafile_exe_path,
