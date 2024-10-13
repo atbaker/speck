@@ -1,4 +1,5 @@
 import base64
+from collections import defaultdict
 from datetime import datetime
 import enum
 import email
@@ -397,6 +398,81 @@ class Mailbox(Base):
             ).scalars().all()
 
         return threads
+
+
+    def search(self, query: str, max_results: int = 20):
+        # Set the RRF parameters
+        k = max_results
+        rrf_k = 60
+        weight_vec = 0.8
+        weight_fts = 1.0
+
+        # Generate an embedding for the query
+        query_embedding = generate_embedding(query)
+        serialized_query_embedding = serialize_float32(query_embedding)
+
+        # Vector search query
+        vec_query = '''
+        SELECT
+            rowid,
+            distance,
+            ROW_NUMBER() OVER (ORDER BY distance) AS rank_number
+        FROM (
+            SELECT
+                rowid,
+                vec_distance_L2(body_embedding, :query_embedding) AS distance
+            FROM messages
+            WHERE mailbox_id = :mailbox_id AND body_embedding IS NOT NULL
+            ORDER BY distance
+            LIMIT :k
+        )
+        '''
+
+        # FTS search query
+        fts_query = '''
+        SELECT
+            rowid AS id,
+            rank AS score,
+            ROW_NUMBER() OVER (ORDER BY rank) AS rank_number
+        FROM messages_fts
+        WHERE messages_fts MATCH :query
+        LIMIT :k
+        '''
+
+        # Execute the queries
+        with Session(db_engine) as session:
+            vec_results = session.execute(
+                text(vec_query),
+                {'query_embedding': serialized_query_embedding, 'mailbox_id': self.id, 'k': k}
+            ).fetchall()
+
+            fts_results = session.execute(
+                text(fts_query),
+                {'query': query, 'k': k}
+            ).fetchall()
+
+        # Perform RRF fusion
+        scores = defaultdict(float)
+        for rowid, distance, rank_number in vec_results:
+            scores[rowid] += weight_vec / (rrf_k + rank_number)
+
+        for rowid, score, rank_number in fts_results:
+            scores[rowid] += weight_fts / (rrf_k + rank_number)
+
+        # Sort the results by the combined scores in descending order
+        ranked_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+        # Fetch Message objects
+        message_rowids = [rowid for rowid, score in ranked_results[:max_results]]
+        with Session(db_engine) as session:
+            messages = session.execute(
+                select(Message).where(Message.rowid.in_(message_rowids))
+            ).scalars().all()
+
+        # Sort messages according to the ranked order
+        messages.sort(key=lambda m: message_rowids.index(m.rowid))
+
+        return messages
 
     def search_embeddings(self, query: str, k: int = 10):
         """Search the mailbox's embeddings for a query."""
