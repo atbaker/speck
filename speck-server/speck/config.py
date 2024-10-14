@@ -67,16 +67,21 @@ class Settings(BaseSettings):
         #     'api_key': os.environ['VLLM_API_KEY'],
         #     'model': 'hugging-quants/Meta-Llama-3.1-70B-Instruct-AWQ-INT4'
         # },
-        'cerebras': {
-            'endpoint': 'https://api.cerebras.ai/v1',
-            'api_key': os.environ['CEREBRAS_API_KEY'],
-            'model': 'llama3.1-70b'
+        # 'cerebras': {
+        #     'endpoint': 'https://api.cerebras.ai/v1',
+        #     'api_key': os.environ['CEREBRAS_API_KEY'],
+        #     'model': 'llama3.1-70b'
+        # },
+        'featherless': {
+            'endpoint': 'https://api.featherless.ai/v1',
+            'api_key': os.environ['FEATHERLESS_API_KEY'],
+            'model': 'meta-llama/Meta-Llama-3.1-70B',
         },
-        'fireworks': {
-            'endpoint': 'https://api.fireworks.ai/inference/v1',
-            'api_key': os.environ['FIREWORKS_API_KEY'],
-            'model': 'accounts/fireworks/models/llama-v3p1-70b-instruct'
-        }
+        # 'fireworks': {
+        #     'endpoint': 'https://api.fireworks.ai/inference/v1',
+        #     'api_key': os.environ['FIREWORKS_API_KEY'],
+        #     'model': 'accounts/fireworks/models/llama-v3p1-70b-instruct'
+        # }
     }
 
     # Google OAuth

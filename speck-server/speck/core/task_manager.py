@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import importlib
 import multiprocessing
+import pickle
 import threading
 import time
 import logging
@@ -22,6 +24,19 @@ def configure_worker_logging(log_queue):
         logger.setLevel(logging.INFO)
         logger.addHandler(queue_handler)
 
+def get_task_key(task: Callable, args: tuple, kwargs: dict):
+    """
+    Generate a unique key for a task.
+    """
+    # Create a tuple with task function name and arguments
+    task_tuple = (task.__module__, task.__name__, args, tuple(sorted(kwargs.items())))
+
+    # Serialize and hash it
+    task_bytes = pickle.dumps(task_tuple)
+    task_hash = hashlib.md5(task_bytes).hexdigest()
+
+    return task_hash
+
 # Worker function
 def worker(
         queue_name,
@@ -29,7 +44,8 @@ def worker(
         stop_event,
         log_queue,
         task_manager_log_file,
-        pipe_conn
+        pipe_conn,
+        pending_tasks
     ):
     configure_worker_logging(log_queue)
     logger = logging.getLogger(f'worker-{queue_name}')
@@ -39,7 +55,8 @@ def worker(
         task_queues=task_queues,
         log_queue=log_queue,
         stop_event=stop_event,
-        log_file=task_manager_log_file
+        log_file=task_manager_log_file,
+        pending_tasks=pending_tasks
     )
 
     # Identify which queue we're working
@@ -48,7 +65,10 @@ def worker(
     # Work the queue
     while not stop_event.is_set():
         try:
+            # Get the task and the task_key
             task, args, kwargs = task_queue.get(timeout=1)
+            task_key = get_task_key(task, args, kwargs)
+
             logger.info(f"Executing task {task.__name__} with args {args} and kwargs {kwargs}")
             try:
                 cache.set('last_task', task.__name__)
@@ -60,6 +80,9 @@ def worker(
 
             except Exception as e:
                 logger.error(f"Error executing task {task.__name__}: {e}", exc_info=True)
+            finally:
+                if task_key in pending_tasks:
+                    del pending_tasks[task_key]
         except Empty:
             continue
 
@@ -113,6 +136,7 @@ class TaskManager:
             recurring_tasks: Optional[list] = None,
             task_queues=None,
             log_queue=None,
+            pending_tasks=None,
             stop_event=None
         ):
         self.task_queues = task_queues if task_queues is not None else {
@@ -134,8 +158,26 @@ class TaskManager:
         self.parent_conns = {}
         self.child_conns = {}
 
+        # Create a Manager and a shared dict for pending tasks
+        if pending_tasks is None:
+            self.manager = multiprocessing.Manager()
+            self.pending_tasks = self.manager.dict()
+        else:
+            self.pending_tasks = pending_tasks
+
     def add_task(self, task: Callable, queue_name: str = 'general', *args, **kwargs):
+        """
+        Add a task to a queue. Checks if the task is already pending before adding it.
+        """
+        # Get a unique key for the task and check if it's already pending
+        task_key = get_task_key(task, args, kwargs)
+        if task_key in self.pending_tasks:
+            self.logger.info(f"Task {task.__name__} with args {args} and kwargs {kwargs} is already pending, ignoring.")
+            return
+
+        # Add the task to the pending tasks dict and the queu
         self.logger.info(f"Adding task {task.__name__} to {queue_name} queue")
+        self.pending_tasks[task_key] = True
         self.task_queues[queue_name].put((task, args, kwargs))
 
     def start(self):
@@ -153,6 +195,7 @@ class TaskManager:
                     self.log_queue,
                     self.log_file,
                     child_conn,
+                    self.pending_tasks
                 )
             )
             process.start()
@@ -212,6 +255,7 @@ def initialize_task_manager(
         recurring_tasks: Optional[list] = None,
         task_queues=None,
         log_queue=None,
+        pending_tasks=None,
         stop_event=None
     ):
     global task_manager
@@ -220,6 +264,7 @@ def initialize_task_manager(
         recurring_tasks=recurring_tasks,
         task_queues=task_queues,
         log_queue=log_queue,
+        pending_tasks=pending_tasks,
         stop_event=stop_event
     )
 

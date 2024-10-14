@@ -91,7 +91,7 @@ def upgrade() -> None:
     # Apply the check constraint with batch_alter_table because sqlite doesn't
     # support normal ALTER TABLE statements
     with op.batch_alter_table('messages') as batch_op:
-        batch_op.create_check_constraint('chk_body_embedding_valid', "(body_embedding IS NULL) OR (typeof(body_embedding) = 'blob' AND vec_length(body_embedding) = 384)")
+        batch_op.create_check_constraint('chk_body_embedding_valid', "(body_embedding IS NULL) OR (typeof(body_embedding) = 'blob' AND vec_length(body_embedding) = 768)")
 
 
 def downgrade() -> None:

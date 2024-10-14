@@ -74,7 +74,7 @@ class Mailbox(Base):
             logging.info(f"Fetched {len(thread_ids)} inbox threads so far, fetching next page...")
 
         # Next, fetch all threads with messages received in the past 31 days
-        after_date = pendulum.now('utc').subtract(days=32) # 32 to be safe
+        after_date = pendulum.now('utc').subtract(days=91) # 32 to be safe
         next_page_token = None
         while True:
             response = client.users().threads().list(userId='me', q=f'after:{after_date.format("YYYY/MM/DD")}', pageToken=next_page_token).execute()
@@ -401,10 +401,16 @@ class Mailbox(Base):
 
 
     def search(self, query: str, max_results: int = 20):
+        """
+        Search the mailbox's messages using both vector search and full text search,
+        combining the results using Reciprocal Rank Fusion (RRF).
+
+        Implementation from: https://alexgarcia.xyz/blog/2024/sqlite-vec-hybrid-search/index.html#hybrid-approach-2-reciprocal-rank-fusion-rrf
+        """
         # Set the RRF parameters
         k = max_results
         rrf_k = 60
-        weight_vec = 0.8
+        weight_vec = 0.6
         weight_fts = 1.0
 
         # Generate an embedding for the query
@@ -679,7 +685,7 @@ class Thread(Base):
         Analyze this email thread from the user's inbox, responding with a category and a summary.
 
         When deciding between multiple categories, choose the one that best fits the most recently received message. If no category fits well, use the "Miscellaneous" category.
-        Your summary should be brief, no longer than 80 characters. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.
+        Your summary should be brief: 10-12 words, less than 80 characters. Focus on the main point of the thread and any actionable items for the user. In threads with many messages, focus on the most recent messages.
 
         {{ format_instructions }}
 
@@ -705,7 +711,7 @@ class Thread(Base):
 
         class ThreadAnalysis(BaseModel):
             category: ThreadCategory
-            summary: str = Field(max_length=80)
+            summary: str = Field(max_length=100) # It's okay if the LLM overshoots the 80 char limit here
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
@@ -781,7 +787,7 @@ class Message(Base):
     body_embedding: Mapped[Optional[bytes]] = mapped_column(
         BLOB,
         CheckConstraint(
-            "(body_embedding IS NULL) OR (typeof(body_embedding) = 'blob' AND vec_length(body_embedding) = 384)",
+            "(body_embedding IS NULL) OR (typeof(body_embedding) = 'blob' AND vec_length(body_embedding) = 768)",
             name='chk_body_embedding_valid'
         )
     )

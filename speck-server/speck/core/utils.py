@@ -65,7 +65,7 @@ def generate_completion_with_validation(
         api_key = 'not-necessary-for-local-completions'
         model = ''
     else:
-        provider_settings = settings.cloud_inference_providers['cerebras']
+        provider_settings = settings.cloud_inference_providers['featherless']
         base_url = provider_settings['endpoint']
         api_key = provider_settings['api_key']
         model = provider_settings['model']

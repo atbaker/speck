@@ -39,7 +39,7 @@ class LLMServiceManager:
                 '--listen',
                 f'127.0.0.1:{service_port}',
                 '--model',
-                os.path.join(settings.models_dir, 'all-MiniLM-L6-v2.F16.gguf')
+                os.path.join(settings.models_dir, 'nomic-embed-text-v1.5.Q6_K.gguf')
             ]
         elif model_type == 'completion':
             service_port = '17727'

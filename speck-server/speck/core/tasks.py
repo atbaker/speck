@@ -14,8 +14,8 @@ def download_models():
     A task run on startup to download the model Llamafile will use. For now,
     downloads just a single model for generating embeddings.
     """
-    embedding_model_url = 'https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2.F16.gguf?download=true'
-    embedding_model_output_path = os.path.join(settings.models_dir, 'all-MiniLM-L6-v2.F16.gguf')
+    embedding_model_url = 'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q6_K.gguf?download=true'
+    embedding_model_output_path = os.path.join(settings.models_dir, 'nomic-embed-text-v1.5.Q6_K.gguf')
     download_file(embedding_model_url, embedding_model_output_path)
 
     if settings.use_local_completions:
