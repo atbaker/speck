@@ -89,7 +89,7 @@ class Profile(Base):
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': [message.get_details() for message in messages]
+            'message_details': [message.get_details(include_body=True, as_string=True) for message in messages]
         }
 
         result = generate_completion_with_validation(
@@ -122,7 +122,7 @@ class Profile(Base):
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': [message.get_details() for message in order_confirmation_messages]
+            'message_details': [message.get_details(include_body=True, as_string=True) for message in order_confirmation_messages]
         }
 
         result = generate_completion_with_validation(
@@ -156,7 +156,7 @@ class Profile(Base):
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'message_details': [message.get_details() for message in banking_messages]
+            'message_details': [message.get_details(include_body=True, as_string=True) for message in banking_messages]
         }
 
         result = generate_completion_with_validation(

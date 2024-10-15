@@ -8,7 +8,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from emails.tools import ListThreadsTool
+from emails.tools import ListThreadsTool, SearchThreadsTool, GetThreadTool
 from config import settings
 
 
@@ -17,9 +17,11 @@ class State(TypedDict):
     summary: str
 
 list_threads_tool = ListThreadsTool()
-tools = [list_threads_tool]
+search_threads_tool = SearchThreadsTool()
+get_thread_tool = GetThreadTool()
+tools = [list_threads_tool, search_threads_tool, get_thread_tool]
 
-provider_settings = settings.cloud_inference_providers['fireworks']
+provider_settings = settings.cloud_inference_providers['cerebras']
 llm = ChatOpenAI(
     base_url=provider_settings['endpoint'],
     openai_api_key=provider_settings['api_key'],
@@ -41,11 +43,10 @@ def should_continue(state: State):
         return 'tools'
 
     # Otherwise, check if we need to summarize the conversation
-    # TODO: Don't summarize for now, will add back in later
-    # if len(messages) > 5:
-    #     return 'summarize'
-    # else:
-    return END
+    if len(messages) > 4:
+        return 'summarize'
+    else:
+        return END
 
 def invoke_llm_with_summary(state: State):
     # If a summary exists, add it as a system message
@@ -55,6 +56,12 @@ def invoke_llm_with_summary(state: State):
         messages = [SystemMessage(content=summary_message)] + state["messages"]
     else:
         messages = state["messages"]
+
+    # Always prepend a system message before invoking the LLM
+    messages = [
+        SystemMessage("You are Speck, an AI assistant that can help answer questions related to a user's Gmail mailbox. You have tools available to list threads, search threads, get the details of a thread."),
+        *messages,
+    ]
 
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}

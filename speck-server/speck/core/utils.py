@@ -41,15 +41,12 @@ def generate_completion_with_validation(
         max_retries: int = 3
 ):
     """
-    Uses LangChain and RunPod to evaluate a prompt and return a Pydantic
-    model.
+    Uses LangChain to evaluate a prompt and return a Pydantic model.
     """
     from langchain_core.output_parsers import PydanticOutputParser
     parser = PydanticOutputParser(pydantic_object=output_model)
 
-    # Extend the prompt with the output format, and add format instructions to our partial variables
-    # prompt_template += "\n<output-format>Wrap the output in triple backticks (```), not <json> tags.\n{{format_instructions}}</output-format>"
-    # prompt_template += "\n{{ format_instructions }}"
+    # Add format instructions to our partial variables
     partial_variables['format_instructions'] = parser.get_format_instructions()
 
     # Render the prompt with the partial variables
@@ -65,7 +62,7 @@ def generate_completion_with_validation(
         api_key = 'not-necessary-for-local-completions'
         model = ''
     else:
-        provider_settings = settings.cloud_inference_providers['featherless']
+        provider_settings = settings.cloud_inference_providers['cerebras']
         base_url = provider_settings['endpoint']
         api_key = provider_settings['api_key']
         model = provider_settings['model']
@@ -147,6 +144,7 @@ def reset_database():
     """
     Resets the Speck database. Used during local development.
     """
+    from chat.models import Conversation
     from emails.models import Mailbox, Message, Thread
     with Session(db_engine) as session:
         # Keep the Mailbox but reset the sync fields
@@ -159,6 +157,9 @@ def reset_database():
         # Delete all Message and Thread rows
         session.execute(delete(Message))
         session.execute(delete(Thread))
+
+        # Delete all Conversation rows
+        session.execute(delete(Conversation))
 
         # The LangGraph SQLite checkpointer creates additional tables we need
         # to delete manually

@@ -5,6 +5,7 @@ import enum
 import email
 from googleapiclient.errors import HttpError as GoogleApiHttpError
 import html2text
+import json
 import uuid
 import logging
 import pendulum
@@ -74,7 +75,7 @@ class Mailbox(Base):
             logging.info(f"Fetched {len(thread_ids)} inbox threads so far, fetching next page...")
 
         # Next, fetch all threads with messages received in the past 31 days
-        after_date = pendulum.now('utc').subtract(days=91) # 32 to be safe
+        after_date = pendulum.now('utc').subtract(days=32) # 32 to be safe
         next_page_token = None
         while True:
             response = client.users().threads().list(userId='me', q=f'after:{after_date.format("YYYY/MM/DD")}', pageToken=next_page_token).execute()
@@ -390,15 +391,19 @@ class Mailbox(Base):
 
         return state
 
-    def list_threads(self, max_results: int = 100):
-        """List the threads in the mailbox."""
-        with Session(db_engine) as session:
-            threads = session.execute(
-                select(Thread).where(Thread.mailbox_id == self.id).order_by(Thread.history_id.desc()).limit(max_results)
-            ).scalars().all()
+    def list_threads(self, search: str = None, max_results: int = 10):
+        """List the threads in the mailbox. Used to power the `list_threads` tool."""
+        # If we have a search query, use the search method to get our threads
+        if search:
+            threads = self.search(search, max_results)
+        else:
+            # Otherwise, just query for the most recently updated threads
+            with Session(db_engine) as session:
+                threads = session.execute(
+                    select(Thread).where(Thread.mailbox_id == self.id).order_by(Thread.history_id.desc()).limit(max_results)
+                ).scalars().all()
 
         return threads
-
 
     def search(self, query: str, max_results: int = 20):
         """
@@ -475,10 +480,22 @@ class Mailbox(Base):
                 select(Message).where(Message.rowid.in_(message_rowids))
             ).scalars().all()
 
-        # Sort messages according to the ranked order
-        messages.sort(key=lambda m: message_rowids.index(m.rowid))
+            # Sort messages according to the ranked order
+            messages.sort(key=lambda m: message_rowids.index(m.rowid))
 
-        return messages
+            # Convert the messages to a list of threads, maintaining the order
+            threads = []
+            for message in messages:
+                thread = message.thread
+
+                # Access thread.messages here to force a query
+                # TODO: Find a more efficient way to do this
+                thread.messages
+
+                if thread not in threads:
+                    threads.append(thread)
+
+        return threads
 
     def search_embeddings(self, query: str, k: int = 10):
         """Search the mailbox's embeddings for a query."""
@@ -619,7 +636,7 @@ class Thread(Base):
     messages: Mapped[list["Message"]] = relationship(
         back_populates='thread',
         cascade='all, delete',
-        lazy='subquery',
+        lazy='selectin',
         order_by='desc(Message.received_at)'
     )
 
@@ -646,23 +663,23 @@ class Thread(Base):
         }
         return state
 
-    def get_details(self):
+    def get_details(self, include_body: bool = False, as_string: bool = False):
         """
         Renders the details for this thread and its messages, to be used in prompts.
         """
-        message_details = '\n'.join([message.get_details() for message in self.messages])
+        thread_details = {
+            'id': self.id,
+            'category': self.category,
+            'summary': self.summary,
+            'messages': [message.get_details(include_body=include_body, as_string=as_string) for message in self.messages]
+        }
 
-        thread_details = f"""
-        <email-thread>
-            { '<thread-category>' + self.category.value + '</thread-category>' if self.category else ''}
-            { '<thread-summary>' + self.summary + '</thread-summary>' if self.summary else ''}
-            <email-messages>
-                { message_details }
-            </email-messages>
-        </email-thread>
-        """
+        # If we're not rendering as a string, we're done
+        if not as_string:
+            return thread_details
 
-        return thread_details
+        # Otherwise, dump to a JSON string
+        return json.dumps(thread_details)
     
     def analyze_and_process(self):
         """
@@ -715,7 +732,7 @@ class Thread(Base):
 
         input_variables = {
             'general_context': self.mailbox.get_general_context(),
-            'thread_details': self.get_details()
+            'thread_details': self.get_details(include_body=True, as_string=True)
         }
 
         result = generate_completion_with_validation(
@@ -772,7 +789,10 @@ class Message(Base):
     history_id: Mapped[int] = mapped_column(Integer)
 
     thread_id: Mapped[str] = mapped_column(ForeignKey('threads.id'))
-    thread: Mapped["Thread"] = relationship(back_populates='messages')
+    thread: Mapped["Thread"] = relationship(
+        back_populates='messages',
+        lazy='selectin'
+    )
 
     label_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
 
@@ -801,25 +821,30 @@ class Message(Base):
         """Returns True if the message is in the user's inbox."""
         return 'INBOX' in self.label_ids
 
-    def get_details(self):
+    def get_details(self, include_body: bool = False, as_string: bool = False):
         """
         Renders the message details for this message, to be used in prompts.
         """
-        message_details = f"""
-        <email-message-user-received>
-            <from>{ self.from_ }</from>
-            <to>{ self.to }</to>
-            <cc>{ self.cc }</cc>
-            <bcc>{ self.bcc }</bcc>
-            <subject>{ self.subject }</subject>
-            <received-at>{ self.received_at }</received-at>
-            <body>
-            { self.body }
-            </body>
-        </email-message-user-received>
-        """
+        message_details = {
+            'from': self.from_,
+            'to': self.to,
+            'cc': self.cc,
+            'bcc': self.bcc,
+            'subject': self.subject,
+            'received_at': self.received_at,
+        }
 
-        return message_details
+        if include_body:
+            message_details['body'] = self.body
+
+        # If we're not rendering as a string, we're done
+        if not as_string:
+            return message_details
+
+        # Otherwise, adjust all unserializable values and render as a JSON string
+        message_details['received_at'] = self.received_at.isoformat()
+
+        return json.dumps(message_details)
 
     def generate_embedding(self):
         """Generate an embedding for the message."""
