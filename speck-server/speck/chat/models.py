@@ -1,4 +1,6 @@
 from datetime import datetime
+import markdown
+import nh3
 from pydantic import BaseModel
 from typing import Literal
 import uuid
@@ -62,10 +64,14 @@ class Conversation(Base):
             if message_type not in ('human', 'ai'):
                 continue
 
+            # Use markdown and nh3 to render the message into HTML
+            html_content = markdown.markdown(graph_message.content)
+            cleaned_content = nh3.clean(html_content)
+
             message = Message(
                 id=graph_message.id,
                 sender='user' if message_type == 'human' else 'speck',
-                content=graph_message.content,
+                content=cleaned_content,
                 created_at=user_message_created_at if message_type == 'human' else pendulum.now(),
             )
             self.messages.append(message)

@@ -12,6 +12,17 @@ from emails.tools import ListThreadsTool, SearchThreadsTool, GetThreadTool
 from config import settings
 
 
+SYSTEM_MESSAGE = """
+You are Speck, an AI chat assistant that can help answer questions related to a user's Gmail mailbox.
+
+You have tools available to retrieve information from the user's mailbox. The user has already authorized your app to access their Gmail. Use `ListThreads` to get a list of threads, `SearchThreads` to search for a thread, and `GetThread` to get the details of a thread.
+
+Try to give the user a complete but concise answer to their question.
+
+Use markdown in your responses to format your messages.
+"""
+
+
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     summary: str
@@ -55,7 +66,7 @@ def should_continue(state: State):
 def invoke_llm_with_summary(state: State):
     # Always add the system message as the first message
     messages = [
-        SystemMessage("You are Speck, an AI chat assistant that can help answer questions related to a user's Gmail mailbox. You have tools available to retrieve information from the user's mailbox. Use `ListThreads` to get a list of threads, `SearchThreads` to search for a thread, and `GetThread` to get the details of a thread. Try to give the user a complete but concise answer to their question."),
+        SystemMessage(content=SYSTEM_MESSAGE),
         *state["messages"],
     ]
 

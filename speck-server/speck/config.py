@@ -80,6 +80,7 @@ class Settings(BaseSettings):
         'fireworks': {
             'endpoint': 'https://api.fireworks.ai/inference/v1',
             'api_key': os.environ['FIREWORKS_API_KEY'],
+            # 'model': 'accounts/fireworks/models/llama-v3p2-3b-instruct'
             # 'model': 'accounts/fireworks/models/llama-v3p1-8b-instruct',
             'model': 'accounts/fireworks/models/llama-v3p1-70b-instruct'
             # 'model': 'accounts/fireworks/models/llama-v3p1-405b-instruct'

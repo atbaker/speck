@@ -31,6 +31,8 @@ pydantic-settings = "^2.3.4"
 sqlalchemy = "^2.0.35"
 sqlite-vec = "^0.1.1"
 uvicorn = "^0.30.3"
+markdown = "^3.7"
+nh3 = "^0.2.18"
 
 
 [tool.poetry.group.dev.dependencies]

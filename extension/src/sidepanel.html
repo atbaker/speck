@@ -14,18 +14,13 @@
             <p class="text-sm text-gray-500 mt-2" x-text="threadId"></p>
         </div>
 
-        <!-- Chat history fills all available space under thread data -->
-        <div class="flex-grow overflow-y-auto p-4" x-ref="chatContainer">
-            <div class="space-y-4">
-                <!-- Render messages -->
-                <template x-for="message in messages">
-                    <div x-bind:class="message.messageClass">
-                        <div x-bind:class="message.bubbleClass">
-                            <p class="text-sm" x-text="message.content"></p>
-                        </div>
-                    </div>
-                </template>
-            </div>
+        <!-- Chat Container -->
+        <div x-ref="chatContainer" class="chat-container overflow-y-auto h-full p-4">
+            <template x-for="(message, index) in messages" :key="index">
+                <div :class="message.messageClass">
+                    <div :class="message.bubbleClass" x-html="message.content"></div>
+                </div>
+            </template>
         </div>
 
         <!-- Message input at the bottom -->

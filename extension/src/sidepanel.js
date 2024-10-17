@@ -113,8 +113,13 @@ document.addEventListener('alpine:init', () => {
         },
         addMessage(sender, content) {
             const messageClass = sender === 'User' ? 'flex justify-end' : 'flex';
-            const bubbleClass = sender === 'User' ? 'bg-blue-500 text-white p-3 rounded-lg' : 'bg-gray-200 p-3 rounded-lg';
 
+            // Include all required classes in the bubbleClass string
+            const bubbleClass = sender === 'User'
+                ? 'bg-blue-500 text-white m-2 p-3 rounded-lg prose max-w-none'
+                : 'bg-gray-200 m-2 p-3 rounded-lg prose max-w-none';
+
+            // Add the message with the full class string
             this.messages.push({
                 sender: sender,
                 content: content,
