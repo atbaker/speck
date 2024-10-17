@@ -21,7 +21,7 @@ search_threads_tool = SearchThreadsTool()
 get_thread_tool = GetThreadTool()
 tools = [list_threads_tool, search_threads_tool, get_thread_tool]
 
-provider_settings = settings.cloud_inference_providers['cerebras']
+provider_settings = settings.cloud_inference_providers['fireworks']
 llm = ChatOpenAI(
     base_url=provider_settings['endpoint'],
     openai_api_key=provider_settings['api_key'],
@@ -42,28 +42,31 @@ def should_continue(state: State):
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return 'tools'
 
-    # Otherwise, check if we need to summarize the conversation
-    if len(messages) > 4:
+    # Otherwise, check the length of the conversation
+    most_recent_message = messages[-1]
+    conversation_token_usage = most_recent_message.response_metadata['token_usage']['total_tokens']
+
+    # Summarize the conversation if we've used more than 32768 tokens
+    if conversation_token_usage > 32768:
         return 'summarize'
     else:
         return END
 
 def invoke_llm_with_summary(state: State):
+    # Always add the system message as the first message
+    messages = [
+        SystemMessage("You are Speck, an AI chat assistant that can help answer questions related to a user's Gmail mailbox. You have tools available to retrieve information from the user's mailbox. Use `ListThreads` to get a list of threads, `SearchThreads` to search for a thread, and `GetThread` to get the details of a thread. Try to give the user a complete but concise answer to their question."),
+        *state["messages"],
+    ]
+
     # If a summary exists, add it as a system message
     summary = state.get("summary", "")
     if summary:
         summary_message = f'Summary of conversation so far: {summary}'
-        messages = [SystemMessage(content=summary_message)] + state["messages"]
-    else:
-        messages = state["messages"]
-
-    # Always prepend a system message before invoking the LLM
-    messages = [
-        SystemMessage("You are Speck, an AI assistant that can help answer questions related to a user's Gmail mailbox. You have tools available to list threads, search threads, get the details of a thread."),
-        *messages,
-    ]
+        messages = [SystemMessage(content=summary_message)] + messages
 
     response = llm_with_tools.invoke(messages)
+
     return {"messages": [response]}
 
 def summarize_conversation(state: State):
@@ -73,7 +76,10 @@ def summarize_conversation(state: State):
         # If a summary already exists, we use a different system prompt
         # to summarize it than if one didn't
         summary_message = (
-            f"This is summary of the conversation to date: {summary}\n\n"
+            f"This is summary you previously provided of the conversation to date:\n\n"
+            f"\"\"\"\n"
+            f"{summary}\n"
+            f"\"\"\"\n\n"
             "Update the summary by taking into account the new messages above:"
         )
     else:
@@ -82,8 +88,8 @@ def summarize_conversation(state: State):
     messages = state['messages'] + [HumanMessage(content=summary_message)]
     response = llm.invoke(messages)
 
-    # Now, delete all but the last two messages
-    delete_messages = [RemoveMessage(id=message.id) for message in state['messages'][:-2]]
+    # Now, delete all but the last three messages (except the system message)
+    delete_messages = [RemoveMessage(id=message.id) for message in state['messages'][:-3] if not isinstance(message, SystemMessage)]
     return {"messages": delete_messages, "summary": response.content}
 
 def get_graph_builder():

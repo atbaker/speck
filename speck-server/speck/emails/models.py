@@ -23,7 +23,7 @@ from core.utils import generate_embedding, generate_completion_with_validation
 from core.task_manager import task_manager
 from library import speck_library, FunctionResult
 
-from .utils import get_gmail_api_client
+from .utils import get_gmail_api_client, preprocess_fts_query
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +237,16 @@ class Mailbox(Base):
             else:
                 raise e
 
+        # Generate a set of the label_ids from each message in the thread
+        label_ids = set()
+        for message in response['messages']:
+            label_ids.update(message['labelIds'])
+
+        # If "SPAM" is in the label_ids, then we shouldn't add this thread to
+        # the database
+        if 'SPAM' in label_ids:
+            return
+
         # Set the history_id on the Thread
         thread.history_id = response['historyId']
 
@@ -405,6 +415,15 @@ class Mailbox(Base):
 
         return threads
 
+    def get_thread(self, thread_id: str):
+        """Get a thread from the mailbox by its ID. Used to power the `get_thread` tool."""
+        with Session(db_engine) as session:
+            thread = session.execute(
+                select(Thread).where(Thread.id == thread_id, Thread.mailbox_id == self.id)
+            ).scalar_one()
+
+        return thread
+
     def search(self, query: str, max_results: int = 20):
         """
         Search the mailbox's messages using both vector search and full text search,
@@ -439,6 +458,9 @@ class Mailbox(Base):
         )
         '''
 
+        # Preprocess the query for FTS
+        fts_query_string = preprocess_fts_query(query)
+
         # FTS search query
         fts_query = '''
         SELECT
@@ -446,7 +468,7 @@ class Mailbox(Base):
             rank AS score,
             ROW_NUMBER() OVER (ORDER BY rank) AS rank_number
         FROM messages_fts
-        WHERE messages_fts MATCH :query
+        WHERE messages_fts MATCH :fts_query
         LIMIT :k
         '''
 
@@ -459,7 +481,7 @@ class Mailbox(Base):
 
             fts_results = session.execute(
                 text(fts_query),
-                {'query': query, 'k': k}
+                {'fts_query': fts_query_string, 'k': k}
             ).fetchall()
 
         # Perform RRF fusion

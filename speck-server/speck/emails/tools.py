@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ListThreadsInput(BaseModel):
-    include_body: Optional[bool] = Field(default=False, description="If `true`, the full body of each message will be included in the output. Defaults to `false`.")
-    max_results: Optional[int] = Field(default=10, ge=1, le=100, description="The maximum number of threads to retrieve, up to 100. Defaults to `10`.")
+    max_results: int = Field(default=10, ge=5, le=25, description="The maximum number of threads to retrieve, up to `25`. Defaults to `10`.")
 
 
 class ListThreadsTool(BaseTool):
@@ -26,7 +25,7 @@ class ListThreadsTool(BaseTool):
     args_schema: Type[BaseModel] = ListThreadsInput
 
     def _run(
-        self, include_body: bool, max_results: int, run_manager: Optional[CallbackManagerForToolRun] = None
+        self, max_results: int = 10, run_manager: Optional[CallbackManagerForToolRun] = None
     ) -> str:
         """Use the tool."""
         with Session(db_engine) as session:
@@ -40,7 +39,7 @@ class ListThreadsTool(BaseTool):
             max_results=max_results
         )
 
-        results = [thread.get_details(include_body=include_body) for thread in threads]
+        results = [thread.get_details(include_body=True) for thread in threads]
 
         return {
             'num_threads': len(results),
@@ -49,15 +48,8 @@ class ListThreadsTool(BaseTool):
 
 
 class SearchThreadsInput(BaseModel):
-    query: str = Field(default=None, description="A search query to filter the user's email threads.")
-    include_body: Optional[bool] = Field(default=False, description="If `true`, the full body of each message will be included in the output. Defaults to `false`. If `true`, the `max_results` argument cannot exceed `5`.")
-    max_results: Optional[int] = Field(default=10, ge=1, le=100, description="The maximum number of threads to retrieve, up to `100` (`5` if `include_body` is `true`).")
-
-    @model_validator(mode='after')
-    def check_max_results(cls, values):
-        if values.include_body and values.max_results > 5:
-            raise ValueError("If `include_body` is `true`, the `max_results` argument cannot exceed `5`.")
-        return values
+    query: str = Field(description="A search query to filter the user's email threads. Enclose a phrase in quotes to match it exactly.")
+    max_results: int = Field(default=10, ge=5, le=25, description="The maximum number of threads to retrieve, up to `25`.")
 
 class SearchThreadsTool(BaseTool):
     name: str = "SearchThreads"
@@ -65,7 +57,7 @@ class SearchThreadsTool(BaseTool):
     args_schema: Type[BaseModel] = SearchThreadsInput
 
     def _run(
-        self, query: str, include_body: bool, max_results: int, run_manager: Optional[CallbackManagerForToolRun] = None
+        self, query: str, max_results: int = 10, run_manager: Optional[CallbackManagerForToolRun] = None
     ) -> str:
         """Use the tool."""
         with Session(db_engine) as session:
@@ -80,7 +72,7 @@ class SearchThreadsTool(BaseTool):
                 max_results=max_results
             )
 
-            results = [thread.get_details(include_body=include_body) for thread in threads]
+            results = [thread.get_details(include_body=True) for thread in threads]
 
         return {
             'num_threads': len(results),

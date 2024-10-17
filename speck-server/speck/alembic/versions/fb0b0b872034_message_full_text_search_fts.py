@@ -25,7 +25,8 @@ def upgrade() -> None:
             body, 
             subject,
             content='messages',
-            content_rowid='rowid'
+            content_rowid='rowid',
+            tokenize='porter'
         )
     """)
 

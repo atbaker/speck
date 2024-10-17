@@ -1,6 +1,7 @@
 import googleapiclient.discovery
 import google.oauth2.credentials
 import keyring
+import re
 
 from config import settings
 
@@ -38,3 +39,24 @@ def get_gmail_api_client():
     keyring.set_password(settings.app_name, 'google_oauth_access_token', credentials.token)
 
     return client
+
+
+def preprocess_fts_query(query: str) -> str:
+    """
+    Preprocess an FTS query to match phrases in quotes or individual words.
+    """
+    # Regular expression to match phrases in quotes or individual words
+    pattern = r'"([^"]+)"|(\S+)'
+    tokens = re.findall(pattern, query)
+
+    processed_tokens = []
+    for phrase, word in tokens:
+        if phrase:
+            # Token is a phrase inside quotes
+            processed_tokens.append(f'"{phrase}"')
+        else:
+            # Token is a single word
+            processed_tokens.append(word)
+    
+    # Combine tokens using OR operator
+    return ' OR '.join(processed_tokens)
